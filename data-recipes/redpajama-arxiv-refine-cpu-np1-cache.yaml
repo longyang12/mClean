@@ -1,0 +1,63 @@
+# global parameters
+project_name: 'Data-Juicer-arxivrecipes-arxiv'
+dataset_path: '/inspire/hdd/project/smartsoftware/yanglong-253108120134/datasets/rp/data/arxiv/arxiv_023827cd-7ee8-42e6-aa7b-661731f4c70f.jsonl'  # path to your dataset directory or file
+export_path: '/inspire/hdd/project/smartsoftware/yanglong-253108120134/datasets/rp/processed_data/arxiv/cpu/np1/cache/processed_arxiv_sample.jsonl'
+
+
+np: 1  # number of subprocess to process your dataset
+open_tracer: true
+# op_fusion: true
+
+use_cache: true
+ds_cache_dir: /inspire/hdd/project/smartsoftware/yanglong-253108120134/cache/arxiv/cpu/np1/cache
+
+# process schedule
+# a list of several process operators with their arguments
+process:
+  - clean_email_mapper:
+  - clean_links_mapper:
+  - fix_unicode_mapper:
+  - punctuation_normalization_mapper:
+  - whitespace_normalization_mapper:
+
+  - alphanumeric_filter:
+      tokenization: false
+      min_ratio: 0.516  # 3sigma
+      max_ratio: 0.915  # 3sigma
+  - average_line_length_filter:  # for code
+      max_len: 682  # 3sigma
+  - character_repetition_filter:
+      rep_len: 10
+      max_ratio: 0.3
+  - flagged_words_filter:
+      lang: en
+      tokenization: true
+      max_ratio: 0.00076  # 3sigma
+  #- language_id_score_filter:  # remove language filter
+  - maximum_line_length_filter:  # for code
+      max_len: 4000
+  - perplexity_filter:
+      lang: en
+      max_ppl: 8000
+  - special_characters_filter:
+      max_ratio: 0.6
+  - text_length_filter:
+      max_len: 350000
+  - words_num_filter:
+      lang: en
+      tokenization: true
+      min_num: 20
+      max_num: 100000
+  - word_repetition_filter:
+      lang: en
+      tokenization: true
+      rep_len: 10
+      max_ratio: 0.574  # 3sigma
+
+  - document_simhash_deduplicator:
+      tokenization: space
+      window_size: 6
+      lowercase: true
+      ignore_pattern: '\p{P}'
+      num_blocks: 6
+      hamming_distance: 4
