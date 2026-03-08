@@ -1,7 +1,12 @@
 # global parameters
 project_name: 'Data-Juicer-arxivrecipes-arxiv'
-dataset_path: '/inspire/hdd/project/smartsoftware/yanglong-253108120134/datasets/rp/data/arxiv/arxiv_023827cd-7ee8-42e6-aa7b-661731f4c70f.jsonl'  # path to your dataset directory or file
-export_path: '/inspire/hdd/project/smartsoftware/yanglong-253108120134/datasets/rp/processed_data/arxiv/cpu/np1/nocache/processed_arxiv_sample.jsonl'
+# on qz
+# dataset_path: '/inspire/hdd/project/smartsoftware/yanglong-253108120134/datasets/rp/data/arxiv/arxiv_023827cd-7ee8-42e6-aa7b-661731f4c70f.jsonl'  # path to your dataset directory or file
+# export_path: '/inspire/hdd/project/smartsoftware/yanglong-253108120134/datasets/rp/processed_data/arxiv/cpu/np1/nocache/processed_arxiv_sample.jsonl'
+
+# on mac
+dataset_path: '/Users/long/Desktop/projects/mClean/data/datasets/rp/data/arxiv/arxiv_023827cd-7ee8-42e6-aa7b-661731f4c70f.jsonl'  # path to your dataset directory or file
+export_path: '/Users/long/Desktop/projects/mClean/data/datasets/rp/processed_data/arxiv/cpu/np1/nocache/processed_arxiv_sample.jsonl'
 
 
 np: 1  # number of subprocess to process your dataset
@@ -9,7 +14,11 @@ open_tracer: true
 # op_fusion: true
 
 use_cache: false
-ds_cache_dir: /inspire/hdd/project/smartsoftware/yanglong-253108120134/cache/arxiv/cpu/np1/nocache
+# on qz
+# ds_cache_dir: /inspire/hdd/project/smartsoftware/yanglong-253108120134/cache/arxiv/cpu/np1/nocache
+
+# on mac
+ds_cache_dir: /Users/long/Desktop/projects/mClean/data/cache/arxiv/cpu/np1/nocache
 
 # process schedule
 # a list of several process operators with their arguments

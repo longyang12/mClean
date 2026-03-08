@@ -2,6 +2,8 @@
 # data & resources
 outputs/
 assets/
+data/
+
 
 # setup
 data_juicer.egg-info/
