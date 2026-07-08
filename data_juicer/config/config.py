@@ -497,6 +497,14 @@ def init_configs(args: Optional[List[str]] = None, which_entry: object = None, l
                 "the probed results. It's False in default.",
             )
             parser.add_argument(
+                "--filter_execution_mode",
+                type=str,
+                default="normal",
+                help='Filter execution mode. Support ["normal", "feature_first"] now. '
+                '"feature_first" rewrites consecutive Filter segments into feature stages '
+                "followed by reduce stages.",
+            )
+            parser.add_argument(
                 "--process",
                 type=List[Dict],
                 default=[],
@@ -706,6 +714,20 @@ def init_setup_from_cfg(cfg: Namespace, load_configs_only=False):
             f"here."
         )
         cfg.np = sys_cpu_count
+
+    cfg.filter_execution_mode = cfg.get("filter_execution_mode", "normal").lower()
+    if cfg.filter_execution_mode not in {"normal", "feature_first"}:
+        raise NotImplementedError(
+            f"Unsupported filter execution mode [{cfg.filter_execution_mode}]. "
+            'Should be one of ["normal", "feature_first"].'
+        )
+    if cfg.filter_execution_mode == "feature_first":
+        if cfg.get("use_checkpoint", False):
+            logger.warning("Disable checkpoint because feature_first filter execution is not compatible with it.")
+            cfg.use_checkpoint = False
+        if cfg.get("op_fusion", False):
+            logger.warning("Disable op fusion because feature_first filter execution is not compatible with it.")
+            cfg.op_fusion = False
 
     # whether or not to use cache management
     # disabling the cache or using checkpoint explicitly will turn off the

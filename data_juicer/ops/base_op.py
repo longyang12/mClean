@@ -5,6 +5,7 @@ import numpy as np
 import pyarrow as pa
 
 from data_juicer.utils.constant import Fields
+from data_juicer.utils.fingerprint_utils import generate_stage_fingerprint
 from data_juicer.utils.mm_utils import size_to_bytes
 from data_juicer.utils.model_utils import free_models
 from data_juicer.utils.process_utils import calculate_np
@@ -459,6 +460,12 @@ class Mapper(OP):
 
 
 class Filter(OP):
+    THRESHOLD_SIGNATURE_KEYS = {
+        "min_closed_interval",
+        "max_closed_interval",
+        "reversed_range",
+    }
+
     def __init__(self, *args, **kwargs):
         """
         Base class that removes specific info.
@@ -527,6 +534,48 @@ class Filter(OP):
     def __call__(self, *args, **kwargs):
         return self.compute_stats(*args, **kwargs)
 
+    def _get_op_cfg_args(self):
+        if hasattr(self, "_op_cfg") and isinstance(self._op_cfg, dict) and len(self._op_cfg) == 1:
+            _, op_args = list(self._op_cfg.items())[0]
+            return copy.deepcopy(op_args or {})
+        return {}
+
+    def _is_threshold_signature_key(self, key):
+        return (
+            key.startswith("min_")
+            or key.startswith("max_")
+            or key.endswith("_threshold")
+            or key == "threshold"
+            or key in self.THRESHOLD_SIGNATURE_KEYS
+        )
+
+    def get_feature_signature(self):
+        op_args = self._get_op_cfg_args()
+        return {key: value for key, value in op_args.items() if not self._is_threshold_signature_key(key)}
+
+    def get_threshold_signature(self):
+        op_args = self._get_op_cfg_args()
+        threshold_args = {key: value for key, value in op_args.items() if self._is_threshold_signature_key(key)}
+        if threshold_args:
+            return threshold_args
+        return op_args
+
+    def get_feature_fingerprint(self, dataset):
+        return generate_stage_fingerprint(
+            getattr(dataset, "_fingerprint", None),
+            self._name,
+            "feature",
+            self.get_feature_signature(),
+        )
+
+    def get_threshold_fingerprint(self, dataset):
+        return generate_stage_fingerprint(
+            getattr(dataset, "_fingerprint", None),
+            self._name,
+            "reduce",
+            self.get_threshold_signature(),
+        )
+
     def get_keep_boolean(self, val, min_val=None, max_val=None):
         res_bool = True
         if min_val is not None:
@@ -574,22 +623,39 @@ class Filter(OP):
         raise NotImplementedError
 
     def run(self, dataset, *, exporter=None, tracer=None, reduce=True):
+        feature_dataset = self.run_feature_stage(dataset, exporter=exporter)
+        if reduce:
+            return self.run_reduce_stage(feature_dataset, tracer=tracer)
+        return feature_dataset
+
+    def run_feature_stage(self, dataset, *, exporter=None):
         dataset = super(Filter, self).run(dataset)
+        feature_fingerprint = self.get_feature_fingerprint(dataset)
         new_dataset = dataset.map(
             self.compute_stats,
             num_proc=self.runtime_np(),
             with_rank=self.use_cuda(),
             batch_size=self.batch_size,
             desc=self._name + "_compute_stats",
+            new_fingerprint=feature_fingerprint,
         )
         if exporter and self.stats_export_path is not None:
             exporter.export_compute_stats(new_dataset, self.stats_export_path)
-        if reduce:
-            new_dataset = new_dataset.filter(
-                self.process, num_proc=self.runtime_np(), batch_size=self.batch_size, desc=self._name + "_process"
-            )
-            if tracer:
-                tracer.trace_filter(self._name, dataset, new_dataset)
+        free_models()
+        return new_dataset
+
+    def run_reduce_stage(self, dataset, *, tracer=None):
+        input_dataset = dataset
+        threshold_fingerprint = self.get_threshold_fingerprint(dataset)
+        new_dataset = dataset.filter(
+            self.process,
+            num_proc=self.runtime_np(),
+            batch_size=self.batch_size,
+            desc=self._name + "_process",
+            new_fingerprint=threshold_fingerprint,
+        )
+        if tracer:
+            tracer.trace_filter(self._name, input_dataset, new_dataset)
         free_models()
         return new_dataset
 

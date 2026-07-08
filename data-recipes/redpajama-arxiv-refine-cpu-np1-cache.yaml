@@ -11,6 +11,7 @@ export_path: '/Users/long/Desktop/projects/mClean/data/datasets/rp/processed_dat
 np: 1  # number of subprocess to process your dataset
 open_tracer: true
 # op_fusion: true
+filter_execution_mode: feature_first
 
 use_cache: true
 # on qz
@@ -28,9 +29,17 @@ process:
   - punctuation_normalization_mapper:
   - whitespace_normalization_mapper:
 
+  - document_simhash_deduplicator:
+      tokenization: space
+      window_size: 6
+      lowercase: true
+      ignore_pattern: '\p{P}'
+      num_blocks: 6
+      hamming_distance: 4
+
   - alphanumeric_filter:
       tokenization: false
-      min_ratio: 0.516  # 3sigma
+      min_ratio: 0.116  # 3sigma
       max_ratio: 0.915  # 3sigma
   - average_line_length_filter:  # for code
       max_len: 682  # 3sigma
@@ -62,10 +71,4 @@ process:
       rep_len: 10
       max_ratio: 0.574  # 3sigma
 
-  - document_simhash_deduplicator:
-      tokenization: space
-      window_size: 6
-      lowercase: true
-      ignore_pattern: '\p{P}'
-      num_blocks: 6
-      hamming_distance: 4
+

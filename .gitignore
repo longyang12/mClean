@@ -40,3 +40,5 @@ perf_bench_data/
 
 # env file
 .env
+
+myplots/

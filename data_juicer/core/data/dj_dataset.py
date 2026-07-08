@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import functools
 import inspect
 import json
 import os
@@ -23,9 +24,34 @@ from data_juicer.utils.compress import (
     compress,
     decompress,
 )
-from data_juicer.utils.fingerprint_utils import generate_fingerprint
+from data_juicer.utils.fingerprint_utils import generate_fingerprint, normalize_function_identity
 from data_juicer.utils.logger_utils import make_log_summarization
 from data_juicer.utils.process_utils import setup_mp
+
+
+def _unwrap_callable_name(func):
+    raw_func = func
+    partial_depth = 0
+    while isinstance(raw_func, functools.partial):
+        partial_depth += 1
+        raw_func = raw_func.func
+    unwrap_depth = 0
+    while hasattr(raw_func, "__wrapped__"):
+        unwrap_depth += 1
+        raw_func = raw_func.__wrapped__
+    bound_self = getattr(raw_func, "__self__", None)
+    owner_name = getattr(bound_self, "_name", None)
+    if owner_name is None and bound_self is not None:
+        owner_name = bound_self.__class__.__name__
+    func_name = getattr(raw_func, "__qualname__", getattr(raw_func, "__name__", raw_func.__class__.__name__))
+    module_name = getattr(raw_func, "__module__", "")
+    return {
+        "owner": owner_name,
+        "function": func_name,
+        "module": module_name,
+        "partial_depth": partial_depth,
+        "unwrap_depth": unwrap_depth,
+    }
 
 
 class DJDataset(ABC):
@@ -291,6 +317,8 @@ class NestedDataset(Dataset, DJDataset):
                 setup_mp(mp_context)
 
                 start = time()
+                input_fp = getattr(dataset, "_fingerprint", None)
+                logger.info(f"[{idx}/{op_num}] OP [{op._name}] start: input_fp={input_fp}, rows={len(dataset)}")
                 # run single op
                 run_args = {
                     "dataset": dataset,
@@ -307,8 +335,10 @@ class NestedDataset(Dataset, DJDataset):
                 if open_monitor:
                     resource_util_list.append(resource_util_per_op)
                 end = time()
+                output_fp = getattr(dataset, "_fingerprint", None)
                 logger.info(
-                    f"[{idx}/{op_num}] OP [{op._name}] Done in " f"{end - start:.3f}s. Left {len(dataset)} samples."
+                    f"[{idx}/{op_num}] OP [{op._name}] done: output_fp={output_fp}, rows={len(dataset)}, "
+                    f"elapsed={end - start:.3f}s"
                 )
 
                 # record the analysis results of the current dataset
@@ -352,6 +382,9 @@ class NestedDataset(Dataset, DJDataset):
         return self.num_rows
 
     def update_args(self, args, kargs, is_filter=False):
+        # Local import to avoid logger being serialized in multiprocessing
+        from loguru import logger
+
         if args:
             args = list(args)
             # the first positional para is function
@@ -390,9 +423,30 @@ class NestedDataset(Dataset, DJDataset):
             ):
                 kargs["with_rank"] = True
 
+        fingerprint_source = "provided"
         if "new_fingerprint" not in kargs or kargs["new_fingerprint"] is None:
             new_fingerprint = generate_fingerprint(self, *args, **kargs)
             kargs["new_fingerprint"] = new_fingerprint
+            fingerprint_source = "generated"
+
+        raw_callable = _unwrap_callable_name(called_func)
+        function_identity = normalize_function_identity(called_func)
+        logger.info(
+            "Dataset.{} fingerprint plan: input_fp={}, new_fp={}, source={}, raw_callable={}, function_identity={}, "
+            "desc={}, num_proc={}, batch_size={}, with_rank={}, batched={}".format(
+                "filter" if is_filter else "map",
+                getattr(self, "_fingerprint", None),
+                kargs.get("new_fingerprint"),
+                fingerprint_source,
+                raw_callable,
+                function_identity,
+                kargs.get("desc"),
+                kargs.get("num_proc"),
+                kargs.get("batch_size"),
+                kargs.get("with_rank"),
+                kargs.get("batched"),
+            )
+        )
 
         return args, kargs
 
@@ -401,11 +455,24 @@ class NestedDataset(Dataset, DJDataset):
         such that the processed samples can be accessed by nested manner."""
 
         args, kargs = self.update_args(args, kargs)
+        from loguru import logger
+
+        input_fp = getattr(self, "_fingerprint", None)
 
         if cache_utils.CACHE_COMPRESS:
             decompress(self, kargs["new_fingerprint"], kargs["num_proc"] if "num_proc" in kargs else 1)
 
         new_ds = NestedDataset(super().map(*args, **kargs))
+        logger.info(
+            "Dataset.map result: input_fp={}, requested_new_fp={}, output_fp={}, rows={} -> {}, cache_files={}".format(
+                input_fp,
+                kargs.get("new_fingerprint"),
+                getattr(new_ds, "_fingerprint", None),
+                len(self),
+                len(new_ds),
+                len(getattr(new_ds, "cache_files", []) or []),
+            )
+        )
 
         if cache_utils.CACHE_COMPRESS:
             compress(self, new_ds, kargs["num_proc"] if "num_proc" in kargs else 1)
@@ -419,6 +486,9 @@ class NestedDataset(Dataset, DJDataset):
         """Override the filter func, which is called by most common operations,
         such that the processed samples can be accessed by nested manner."""
         args, kargs = self.update_args(args, kargs, is_filter=True)
+        from loguru import logger
+
+        input_fp = getattr(self, "_fingerprint", None)
 
         # For filter, it involves a map and a filter operations, so the final
         # cache files includes two sets with different fingerprint (before and
@@ -439,6 +509,16 @@ class NestedDataset(Dataset, DJDataset):
             self.need_to_cleanup_caches = False
             new_ds = NestedDataset(super().filter(*args, **kargs))
             self.need_to_cleanup_caches = prev_state
+        logger.info(
+            "Dataset.filter result: input_fp={}, requested_new_fp={}, output_fp={}, rows={} -> {}, cache_files={}".format(
+                input_fp,
+                kargs.get("new_fingerprint"),
+                getattr(new_ds, "_fingerprint", None),
+                len(self),
+                len(new_ds),
+                len(getattr(new_ds, "cache_files", []) or []),
+            )
+        )
 
         if cache_utils.CACHE_COMPRESS:
             compress(self, new_ds, kargs["num_proc"] if "num_proc" in kargs else 1)

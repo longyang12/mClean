@@ -14,6 +14,7 @@ from data_juicer.core.executor import ExecutorBase
 from data_juicer.core.exporter import Exporter
 from data_juicer.core.tracer import Tracer
 from data_juicer.ops import load_ops
+from data_juicer.ops.filter_reorder import rewrite_filter_ops_feature_first
 from data_juicer.ops.op_fusion import fuse_operators
 from data_juicer.ops.selector import (
     FrequencySpecifiedFieldSelector,
@@ -144,6 +145,9 @@ class DefaultExecutor(ExecutorBase):
         # 2. extract processes and optimize their orders
         logger.info("Preparing process operators...")
         ops = load_ops(self.cfg.process)
+        if self.cfg.filter_execution_mode == "feature_first":
+            logger.info("Rewriting consecutive Filter segments with feature_first strategy...")
+            ops = rewrite_filter_ops_feature_first(ops)
 
         # OP fusion
         if self.cfg.op_fusion:
