@@ -219,6 +219,8 @@ class VideoCaptioningFromSummarizerMapper(Mapper):
                 self.video_key: loaded_video_keys[offset : offset + vid_count],
                 Fields.meta: {},
             }
+            if self.video_bytes_key in sample:
+                temp_sample[self.video_bytes_key] = sample[self.video_bytes_key][offset : offset + vid_count]
 
             captioned_text_list = []
             # tag ops

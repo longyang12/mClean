@@ -7,7 +7,7 @@ from pydantic import PositiveFloat, PositiveInt
 
 from data_juicer.utils.constant import Fields, StatsKeys
 from data_juicer.utils.lazy_loader import LazyLoader
-from data_juicer.utils.mm_utils import calculate_resized_dimensions
+from data_juicer.utils.mm_utils import calculate_resized_dimensions, get_video_path_from_sample
 
 from ..base_op import OPERATORS, UNFORKABLE, Filter
 
@@ -141,13 +141,14 @@ class VideoMotionScoreFilter(Filter):
         # load videos
         loaded_video_keys = sample[self.video_key]
         unique_motion_scores = {}
-        for video_key in loaded_video_keys:
+        for index, video_key in enumerate(loaded_video_keys):
             # skip duplicate videos
             if video_key in unique_motion_scores:
                 continue
 
             video_motion_scores = []
-            with VideoCapture(video_key) as cap:
+            video_path = get_video_path_from_sample(sample, index, video_key, self.video_bytes_key)
+            with VideoCapture(video_path) as cap:
                 if cap.isOpened():
                     fps = cap.get(cv2.CAP_PROP_FPS)
                     sampling_fps = min(self.sampling_fps, fps)

@@ -98,7 +98,9 @@ class VideoTaggingFromFramesMapper(Mapper):
 
         # load videos
         loaded_video_keys = sample[self.video_key]
-        sample, videos = load_data_with_context(sample, context, loaded_video_keys, load_video)
+        sample, videos = load_data_with_context(
+            sample, context, loaded_video_keys, load_video, mm_bytes_key=self.video_bytes_key
+        )
 
         model = get_model(self.model_key, rank, self.use_cuda())
         video_tags = []

@@ -5,7 +5,11 @@ export_path: './outputs/'
 
 text_keys: 'text'
 video_key: 'videos'
+video_bytes_key: 'video_bytes'
+materialize_video_bytes: false
 image_key: 'images'
+image_bytes_key: 'image_bytes'
+materialize_image_bytes: false
 audio_key: 'audios'
 executor_type: default                                      # type of executor, support "default" or "ray" for now.
 ray_address: auto                                           # the address of the Ray cluster.

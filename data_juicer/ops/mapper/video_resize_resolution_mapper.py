@@ -8,7 +8,7 @@ from data_juicer.utils.constant import Fields
 from data_juicer.utils.file_utils import transfer_filename
 from data_juicer.utils.lazy_loader import LazyLoader
 from data_juicer.utils.logger_utils import HiddenPrints
-from data_juicer.utils.mm_utils import close_video, load_video
+from data_juicer.utils.mm_utils import close_video, get_video_path_from_sample, load_video
 
 from ..base_op import OPERATORS, Mapper
 from ..op_fusion import LOADED_VIDEOS
@@ -106,7 +106,8 @@ class VideoResizeResolutionMapper(Mapper):
         loaded_video_keys = sample[self.video_key]
 
         for index, video_key in enumerate(loaded_video_keys):
-            container = load_video(video_key)
+            video_path = get_video_path_from_sample(sample, index, video_key, self.video_bytes_key)
+            container = load_video(video_path)
             video = container.streams.video[0]
             width = video.codec_context.width
             height = video.codec_context.height
@@ -169,7 +170,7 @@ class VideoResizeResolutionMapper(Mapper):
             resized_video_key = transfer_filename(video_key, OP_NAME, self.save_dir, **self._init_parameters)
             if not os.path.exists(resized_video_key) or resized_video_key not in loaded_video_keys:
                 args = ["-nostdin", "-v", "quiet", "-y"]  # close the ffmpeg log
-                stream = ffmpeg.input(video_key)
+                stream = ffmpeg.input(video_path)
                 stream = stream.filter("scale", width=width, height=height)
                 stream = stream.output(resized_video_key).global_args(*args)
                 stream.run()
@@ -183,4 +184,6 @@ class VideoResizeResolutionMapper(Mapper):
                     sample[Fields.source_file][i] = value
 
         sample[self.video_key] = loaded_video_keys
+        if self.video_bytes_key in sample:
+            sample.pop(self.video_bytes_key, None)
         return sample

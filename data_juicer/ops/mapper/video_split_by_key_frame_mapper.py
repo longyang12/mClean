@@ -3,7 +3,7 @@ import re
 
 from data_juicer.utils.constant import Fields
 from data_juicer.utils.file_utils import add_suffix_to_filename, transfer_filename
-from data_juicer.utils.mm_utils import SpecialTokens
+from data_juicer.utils.mm_utils import SpecialTokens, get_video_path_from_sample
 from data_juicer.utils.video_utils import create_video_reader
 
 from ..base_op import OPERATORS, Mapper
@@ -104,14 +104,16 @@ class VideoSplitByKeyFrameMapper(Mapper):
         split_sample = copy.deepcopy(sample)
         split_sample[self.text_key] = ""
         split_sample[Fields.source_file] = []
+        split_sample.pop(self.video_bytes_key, None)
 
         # load all video(s)
         loaded_video_keys = sample[self.video_key]
         videos = {}
-        for loaded_video_key in loaded_video_keys:
+        for idx, loaded_video_key in enumerate(loaded_video_keys):
             if loaded_video_key not in videos:
                 # avoid loading the same videos
-                video = create_video_reader(loaded_video_key, backend=self.video_backend)
+                video_source = get_video_path_from_sample(sample, idx, loaded_video_key, self.video_bytes_key)
+                video = create_video_reader(video_source, backend=self.video_backend)
                 videos[loaded_video_key] = video
 
         split_video_keys = []

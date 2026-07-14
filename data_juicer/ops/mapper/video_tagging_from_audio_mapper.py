@@ -2,7 +2,7 @@ import numpy as np
 
 from data_juicer.utils.constant import Fields, MetaKeys
 from data_juicer.utils.lazy_loader import LazyLoader
-from data_juicer.utils.mm_utils import extract_audio_from_video
+from data_juicer.utils.mm_utils import extract_audio_from_video, get_video_path_from_sample
 from data_juicer.utils.model_utils import get_model, prepare_model, torch
 
 from ..base_op import OPERATORS, TAGGING_OPS, Mapper
@@ -69,9 +69,10 @@ class VideoTaggingFromAudioMapper(Mapper):
 
         model, feature_extractor = get_model(self.model_key, rank, self.use_cuda())
         video_audio_tags = []
-        for video_path in loaded_video_keys:
+        for idx, video_path in enumerate(loaded_video_keys):
+            video_source = get_video_path_from_sample(sample, idx, video_path, self.video_bytes_key)
             # only extract audio data and sr for index 0 for now
-            ys, srs, valid_indexes = extract_audio_from_video(video_path, stream_indexes=[0])
+            ys, srs, valid_indexes = extract_audio_from_video(video_source, stream_indexes=[0])
             if len(valid_indexes) == 0:
                 # there is no valid audio streams. Skip!
                 video_audio_tags.append(self._no_audio_label)

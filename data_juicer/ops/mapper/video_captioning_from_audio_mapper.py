@@ -4,7 +4,7 @@ import os
 import regex as re
 
 from data_juicer.utils.lazy_loader import LazyLoader
-from data_juicer.utils.mm_utils import SpecialTokens, extract_audio_from_video
+from data_juicer.utils.mm_utils import SpecialTokens, extract_audio_from_video, get_video_path_from_sample
 from data_juicer.utils.model_utils import get_model, prepare_model, torch
 
 from ..base_op import OPERATORS, Mapper
@@ -80,13 +80,17 @@ class VideoCaptioningFromAudioMapper(Mapper):
             vid_count = chunk.count(SpecialTokens.video)
 
             captioned_text_list = []
-            for video in loaded_video_keys[offset : offset + vid_count]:
+            for local_idx, video in enumerate(loaded_video_keys[offset : offset + vid_count], start=offset):
+                video_source = get_video_path_from_sample(sample, local_idx, video, self.video_bytes_key)
+                extracted_audio_prefix = video_source
                 # only extract audio for index 0 for now
-                _, _, valid_indexes = extract_audio_from_video(video, video + ".mp3", stream_indexes=[0])
+                _, _, valid_indexes = extract_audio_from_video(
+                    video_source, extracted_audio_prefix + ".mp3", stream_indexes=[0]
+                )
                 if len(valid_indexes) == 0:
                     # there is no valid audio streams. Skip!
                     continue
-                extracted_audio_path = video + "_0.mp3"
+                extracted_audio_path = extracted_audio_prefix + "_0.mp3"
                 query = f"<audio>{extracted_audio_path}</audio>{self.prompt}"
 
                 # start to inference

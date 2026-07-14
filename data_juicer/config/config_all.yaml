@@ -57,10 +57,13 @@ filter_execution_mode: 'normal'                             # filter execution m
 # for multimodal data processing
 image_key: 'images'                                         # key name of field to store the list of sample image paths.
 image_bytes_key: 'image_bytes'                              # key name of field to store the list of sample image bytes.
+materialize_image_bytes: false                              # whether to read images into image_bytes during formatting for blob-first loading.
 image_special_token: '<__dj__image>'                        # the special token that represents an image in the text. In default, it's "<__dj__image>". You can specify your own special token according to your input dataset.
 audio_key: 'audios'                                         # key name of field to store the list of sample audio paths.
 audio_special_token: '<__dj__audio>'                        # the special token that represents an audio in the text. In default, it's "<__dj__audio>". You can specify your own special token according to your input dataset.
 video_key: 'videos'                                         # key name of field to store the list of sample video paths.
+video_bytes_key: 'video_bytes'                              # key name of field to store the list of sample video bytes.
+materialize_video_bytes: false                              # whether to read videos into video_bytes during formatting for blob-first loading.
 video_special_token: '<__dj__video>'                        # the special token that represents a video in the text. In default, it's "<__dj__video>". You can specify your own special token according to your input dataset.
 
 eoc_special_token: '<|__dj__eoc|>'                          # the special token that represents the end of a chunk in the text. In default, it's "<|__dj__eoc|>". You can specify your own special token according to your input dataset.

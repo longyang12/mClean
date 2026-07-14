@@ -311,6 +311,13 @@ def init_configs(args: Optional[List[str]] = None, which_entry: object = None, l
                 help="Key name of field to store the list of sample image bytes.",  # noqa: E251
             )
             parser.add_argument(
+                "--materialize_image_bytes",
+                type=bool,
+                default=False,
+                help="Whether to materialize image files into the image bytes "
+                "column during formatting so image loading can prefer blob data.",
+            )
+            parser.add_argument(
                 "--image_special_token",
                 type=str,
                 default=SpecialTokens.image,
@@ -337,6 +344,19 @@ def init_configs(args: Optional[List[str]] = None, which_entry: object = None, l
                 type=str,
                 default="videos",
                 help="Key name of field to store the list of sample video paths.",  # noqa: E251
+            )
+            parser.add_argument(
+                "--video_bytes_key",
+                type=str,
+                default="video_bytes",
+                help="Key name of field to store the list of sample video bytes.",  # noqa: E251
+            )
+            parser.add_argument(
+                "--materialize_video_bytes",
+                type=bool,
+                default=False,
+                help="Whether to materialize video files into the video bytes "
+                "column during formatting so video loading can prefer blob data.",
             )
             parser.add_argument(
                 "--video_special_token",
@@ -799,6 +819,7 @@ def init_setup_from_cfg(cfg: Namespace, load_configs_only=False):
         "audio_key": cfg.get("audio_key", "audios"),
         "video_key": cfg.get("video_key", "videos"),
         "image_bytes_key": cfg.get("image_bytes_key", "image_bytes"),
+        "video_bytes_key": cfg.get("video_bytes_key", "video_bytes"),
         "turbo": cfg.get("turbo", False),
         "skip_op_error": cfg.get("skip_op_error", True),
         "work_dir": cfg.work_dir,

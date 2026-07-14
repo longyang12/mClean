@@ -229,34 +229,81 @@ def unify_format(
             data_path_keys.append(audio_key)
         if video_key in dataset.features:
             data_path_keys.append(video_key)
-        if len(data_path_keys) == 0:
-            # no image/audio/video path list in dataset, no need to convert
-            return dataset
 
-        if ds_dir == "":
-            return dataset
+        if len(data_path_keys) > 0 and ds_dir != "":
+            logger.info(
+                "Converting relative paths in the dataset to their "
+                "absolute version. (Based on the directory of input "
+                "dataset file)"
+            )
 
-        logger.info(
-            "Converting relative paths in the dataset to their "
-            "absolute version. (Based on the directory of input "
-            "dataset file)"
+            # function to convert relative paths to absolute paths
+            def rel2abs(sample, path_keys, dataset_dir):
+                for path_key in path_keys:
+                    if path_key not in sample:
+                        continue
+                    paths = sample[path_key]
+                    if not paths:
+                        continue
+                    new_paths = [path if is_absolute_path(path) else os.path.join(dataset_dir, path) for path in paths]
+                    sample[path_key] = new_paths
+                return sample
+
+            dataset = dataset.map(
+                rel2abs, num_proc=num_proc, fn_kwargs={"path_keys": data_path_keys, "dataset_dir": ds_dir}
+            )
+
+        image_bytes_key = global_cfg.image_bytes_key if hasattr(global_cfg, "image_bytes_key") else "image_bytes"
+        materialize_image_bytes = (
+            global_cfg.materialize_image_bytes if hasattr(global_cfg, "materialize_image_bytes") else False
         )
+        if materialize_image_bytes and image_key in dataset.features and image_bytes_key not in dataset.features:
+            logger.info(f"Materializing image blobs into [{image_bytes_key}] for blob-first image loading.")
 
-        # function to convert relative paths to absolute paths
-        def rel2abs(sample, path_keys, dataset_dir):
-            for path_key in path_keys:
-                if path_key not in sample:
-                    continue
-                paths = sample[path_key]
+            def add_image_bytes(sample, path_key, bytes_key):
+                paths = sample.get(path_key, [])
                 if not paths:
-                    continue
-                new_paths = [path if is_absolute_path(path) else os.path.join(dataset_dir, path) for path in paths]
-                sample[path_key] = new_paths
-            return sample
+                    sample[bytes_key] = []
+                    return sample
 
-        dataset = dataset.map(
-            rel2abs, num_proc=num_proc, fn_kwargs={"path_keys": data_path_keys, "dataset_dir": ds_dir}
+                image_bytes = []
+                for path in paths:
+                    with open(path, "rb") as image_file:
+                        image_bytes.append(image_file.read())
+                sample[bytes_key] = image_bytes
+                return sample
+
+            dataset = dataset.map(
+                add_image_bytes,
+                num_proc=num_proc,
+                fn_kwargs={"path_key": image_key, "bytes_key": image_bytes_key},
+            )
+
+        video_bytes_key = global_cfg.video_bytes_key if hasattr(global_cfg, "video_bytes_key") else "video_bytes"
+        materialize_video_bytes = (
+            global_cfg.materialize_video_bytes if hasattr(global_cfg, "materialize_video_bytes") else False
         )
+        if materialize_video_bytes and video_key in dataset.features and video_bytes_key not in dataset.features:
+            logger.info(f"Materializing video blobs into [{video_bytes_key}] for blob-first video loading.")
+
+            def add_video_bytes(sample, path_key, bytes_key):
+                paths = sample.get(path_key, [])
+                if not paths:
+                    sample[bytes_key] = []
+                    return sample
+
+                video_bytes = []
+                for path in paths:
+                    with open(path, "rb") as video_file:
+                        video_bytes.append(video_file.read())
+                sample[bytes_key] = video_bytes
+                return sample
+
+            dataset = dataset.map(
+                add_video_bytes,
+                num_proc=num_proc,
+                fn_kwargs={"path_key": video_key, "bytes_key": video_bytes_key},
+            )
     else:
         logger.warning(
             "No global config passed into unify_format function. "

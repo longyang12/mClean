@@ -1,6 +1,13 @@
 project_name: 'llava-1.5-pretrain-dataset-refine-recipe'
-dataset_path: '/inspire/hdd/project/smartsoftware/yanglong-253108120134/datasets/llava-pretrain/data/chat-dj_part1.jsonl'  # converted LLaVA pretrain dataset in Data-Juicer format with only_keep_caption is True. See tools/multimodal/source_format_to_data_juicer_format/llava_to_dj.py
-export_path: '/inspire/hdd/project/smartsoftware/yanglong-253108120134/datasets/llava-pretrain/processed_data/gpu/np1/cache/processed_sample.jsonl'
+
+# on qz
+# dataset_path: '/inspire/hdd/project/smartsoftware/yanglong-253108120134/datasets/llava-pretrain/data/chat-dj_part1.jsonl'  # converted LLaVA pretrain dataset in Data-Juicer format with only_keep_caption is True. See tools/multimodal/source_format_to_data_juicer_format/llava_to_dj.py
+# export_path: '/inspire/hdd/project/smartsoftware/yanglong-253108120134/datasets/llava-pretrain/processed_data/gpu/np1/cache/processed_sample.jsonl'
+
+# on mac
+dataset_path: '/Users/long/Desktop/projects/mClean/data/datasets/llava-pretrain/data/chat-dj_part1.jsonl'  # path to your dataset directory or file
+export_path: '/Users/long/Desktop/projects/mClean/data/datasets/llava-pretrain/processed_data/gpu/np1/cache/processed_sample.jsonl'
+
 
 np: 1                                                            # number of subprocess to process your dataset
 text_keys: 'text'                                                 # the key name of field where the sample texts to be processed, e.g., `text`, `instruction`, `output`, ...
@@ -10,11 +17,18 @@ image_key: 'images'                                               # Key name of 
 image_special_token: '<image>'                                    # The special token that represents an image in the text. For LLaVA, it's "<image>". Should be aligned with the args when running conversion tools.
 eoc_special_token: '<|__dj__eoc|>'                                # The special token that represents the end of a chunk in the text. In default, it's "<|__dj__eoc|>". You can specify your own special token according to your input dataset. Should be aligned with the args when running conversion tools.
 
-open_tracer: true
+image_bytes_key: 'image_bytes'                                  # Key name of field to store the list of sample image paths.
+materialize_image_bytes: true
+
+open_tracer: false
 
 use_cache: true
-ds_cache_dir: /inspire/hdd/project/smartsoftware/yanglong-253108120134/cache/llava-pretrain/gpu/np1/cache
 
+# on qz
+# ds_cache_dir: /inspire/hdd/project/smartsoftware/yanglong-253108120134/cache/llava-pretrain/gpu/np1/cache
+
+# on mac
+ds_cache_dir: /Users/long/Desktop/projects/mClean/data/cache/llava-pretrain/gpu/np1/cache
 
 # process schedule: a list of several process operators with their arguments
 process:

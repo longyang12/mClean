@@ -7,6 +7,7 @@ import numpy as np
 from data_juicer.utils.cache_utils import DATA_JUICER_ASSETS_CACHE
 from data_juicer.utils.constant import Fields, MetaKeys
 from data_juicer.utils.lazy_loader import LazyLoader
+from data_juicer.utils.mm_utils import get_video_path_from_sample
 from data_juicer.utils.model_utils import get_model, prepare_model
 
 from ..base_op import OPERATORS, TAGGING_OPS, UNFORKABLE, Mapper
@@ -92,7 +93,8 @@ class VideoObjectSegmentingMapper(Mapper):
         sam2_model, sam2_processor = get_model(model_key=self.sam2_model_key, rank=rank, use_cuda=self.use_cuda())
 
         # Perform semantic segmentation on the first frame using YOLOE
-        videoCapture = cv2.VideoCapture(sample[self.video_key][0])
+        video_path = get_video_path_from_sample(sample, 0, sample[self.video_key][0], self.video_bytes_key)
+        videoCapture = cv2.VideoCapture(video_path)
         success, initial_frame = videoCapture.read()
         random_num_str = str(random.randint(10000, 99999))
         now_time_str = str(datetime.now())
@@ -100,7 +102,7 @@ class VideoObjectSegmentingMapper(Mapper):
             if not os.path.exists(DATA_JUICER_ASSETS_CACHE):
                 os.makedirs(DATA_JUICER_ASSETS_CACHE, exist_ok=True)
 
-            temp_video_name = sample[self.video_key][0].split("/")[-1].replace(".mp4", "")
+            temp_video_name = video_path.split("/")[-1].replace(".mp4", "")
             temp_initial_frame_path = os.path.join(
                 DATA_JUICER_ASSETS_CACHE,
                 f"{temp_video_name}_initial_frame_{now_time_str}_{random_num_str}.jpg",
@@ -158,7 +160,7 @@ class VideoObjectSegmentingMapper(Mapper):
         # Track objects with SAM2
         import transformers
 
-        video_frames, _ = transformers.video_utils.load_video(sample[self.video_key][0])
+        video_frames, _ = transformers.video_utils.load_video(video_path)
 
         if rank is not None:
             device = f"cuda:{str(rank)}"

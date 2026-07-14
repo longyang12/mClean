@@ -107,7 +107,9 @@ class VideoFaceBlurMapper(Mapper):
             sample[Fields.source_file] = sample[self.video_key]
 
         loaded_video_keys = sample[self.video_key]
-        sample, videos = load_data_with_context(sample, context, loaded_video_keys, load_video)
+        sample, videos = load_data_with_context(
+            sample, context, loaded_video_keys, load_video, mm_bytes_key=self.video_bytes_key
+        )
 
         model = get_model(self.model_key)
 
@@ -143,4 +145,6 @@ class VideoFaceBlurMapper(Mapper):
                     sample[Fields.source_file][i] = value
 
         sample[self.video_key] = [processed_video_keys[key] for key in loaded_video_keys]
+        if self.video_bytes_key in sample:
+            sample.pop(self.video_bytes_key, None)
         return sample

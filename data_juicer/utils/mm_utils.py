@@ -1,9 +1,11 @@
 import base64
 import datetime
+import hashlib
 import io
 import os
 import re
 import shutil
+import tempfile
 from typing import ClassVar, Dict, List, Optional, Tuple, Union
 
 import av
@@ -221,6 +223,21 @@ def image_byte_to_base64(image_byte):
     return base64.b64encode(image_byte).decode("utf-8")
 
 
+def image_to_base64(image_or_path_or_bytes, image_format="JPEG"):
+    if isinstance(image_or_path_or_bytes, bytes):
+        return image_byte_to_base64(image_or_path_or_bytes)
+    if isinstance(image_or_path_or_bytes, str):
+        return image_path_to_base64(image_or_path_or_bytes)
+    if isinstance(image_or_path_or_bytes, PIL.Image.Image):
+        stream = io.BytesIO()
+        image_or_path_or_bytes.save(stream, format=image_format)
+        return base64.b64encode(stream.getvalue()).decode("utf-8")
+    raise TypeError(
+        "image_to_base64 only supports str paths, bytes, or PIL images, "
+        f"got {type(image_or_path_or_bytes)}."
+    )
+
+
 def pil_to_opencv(pil_image):
     if pil_image.mode != "RGB":
         pil_image = pil_image.convert("RGB")
@@ -330,19 +347,56 @@ def load_videos(paths):
     return [load_video(path) for path in paths]
 
 
-def load_video(path, mode="r"):
-    """
-    Load a video using its path.
+def load_video_byte(path):
+    with open(path, "rb") as video_file:
+        video_data = video_file.read()
+    return video_data
 
-    :param path: the path to this video.
+
+def materialize_video_bytes_to_local_path(video_or_path_or_bytes, suffix=".mp4"):
+    if not isinstance(video_or_path_or_bytes, bytes):
+        return video_or_path_or_bytes
+
+    cache_dir = os.path.join(tempfile.gettempdir(), "data_juicer_video_blobs")
+    os.makedirs(cache_dir, exist_ok=True)
+    digest = hashlib.sha1(video_or_path_or_bytes).hexdigest()
+    materialized_path = os.path.join(cache_dir, f"{digest}{suffix}")
+    if not os.path.exists(materialized_path):
+        with open(materialized_path, "wb") as video_file:
+            video_file.write(video_or_path_or_bytes)
+    return materialized_path
+
+
+def get_video_path_from_sample(sample, mm_idx, video_key, video_bytes_key=None, sample_idx=None):
+    video_bytes = load_mm_bytes_from_sample(sample, mm_idx, video_bytes_key, sample_idx)
+    if video_bytes is None:
+        return video_key
+
+    suffix = ".mp4"
+    if isinstance(video_key, str):
+        candidate_suffix = os.path.splitext(video_key)[1]
+        if candidate_suffix:
+            suffix = candidate_suffix
+    return materialize_video_bytes_to_local_path(video_bytes, suffix=suffix)
+
+
+def load_video(path_or_bytes, mode="r"):
+    """
+    Load a video using its path or bytes.
+
+    :param path_or_bytes: the path or bytes of this video.
     :param mode: the loading mode. It's "r" in default.
     :return: a container object form PyAv library, which contains all streams
         in this video (video/audio/...) and can be used to decode these streams
         to frames.
     """
-    if not os.path.exists(path) and "r" in mode:
-        raise FileNotFoundError(f"Video [{path}] does not exist!")
-    container = av.open(path, mode)
+    if isinstance(path_or_bytes, bytes):
+        container = av.open(io.BytesIO(path_or_bytes), mode=mode)
+        return container
+
+    if not os.path.exists(path_or_bytes) and "r" in mode:
+        raise FileNotFoundError(f"Video [{path_or_bytes}] does not exist!")
+    container = av.open(path_or_bytes, mode)
     return container
 
 

@@ -9,7 +9,7 @@ from data_juicer.ops.load import load_ops
 from data_juicer.utils.cache_utils import DATA_JUICER_ASSETS_CACHE
 from data_juicer.utils.constant import Fields, MetaKeys
 from data_juicer.utils.lazy_loader import LazyLoader
-from data_juicer.utils.mm_utils import SpecialTokens
+from data_juicer.utils.mm_utils import SpecialTokens, get_video_path_from_sample
 from data_juicer.utils.model_utils import get_model, prepare_model
 
 from ..base_op import OPERATORS, Mapper
@@ -156,12 +156,16 @@ class VideoHandReconstructionMapper(Mapper):
             return []
 
         # load videos
-        ds_list = [{"text": SpecialTokens.video, "videos": sample[self.video_key]}]
+        ds_sample = {"text": SpecialTokens.video, self.video_key: sample[self.video_key]}
+        if self.video_bytes_key in sample:
+            ds_sample[self.video_bytes_key] = sample[self.video_bytes_key]
+        ds_list = [ds_sample]
 
         dataset = data_juicer.core.data.NestedDataset.from_list(ds_list)
         dataset = self.fused_ops[0].run(dataset)
 
-        temp_frame_name = os.path.splitext(os.path.basename(sample[self.video_key][0]))[0]
+        video_path = get_video_path_from_sample(sample, 0, sample[self.video_key][0], self.video_bytes_key)
+        temp_frame_name = os.path.splitext(os.path.basename(video_path))[0]
         frames_root = os.path.join(self.frame_dir, temp_frame_name)
         frame_names = os.listdir(frames_root)
         frames_path = sorted([os.path.join(frames_root, frame_name) for frame_name in frame_names])

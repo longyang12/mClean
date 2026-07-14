@@ -6,6 +6,7 @@ import numpy as np
 from data_juicer.utils.cache_utils import DATA_JUICER_ASSETS_CACHE
 from data_juicer.utils.constant import Fields, MetaKeys
 from data_juicer.utils.lazy_loader import LazyLoader
+from data_juicer.utils.mm_utils import get_video_path_from_sample
 from data_juicer.utils.model_utils import get_model, prepare_model
 
 from ..base_op import OPERATORS, TAGGING_OPS, UNFORKABLE, Mapper
@@ -112,7 +113,8 @@ class VideoDepthEstimationMapper(Mapper):
             device = f"cuda:{str(rank)}"
         else:
             device = "cuda"
-        frames, target_fps = self.read_video_frames(sample[self.video_key][0], -1, -1, self.max_res)
+        video_path = get_video_path_from_sample(sample, 0, sample[self.video_key][0], self.video_bytes_key)
+        frames, target_fps = self.read_video_frames(video_path, -1, -1, self.max_res)
         depths, fps = video_depth_anything_model.infer_video_depth(
             frames,
             target_fps,
@@ -122,7 +124,7 @@ class VideoDepthEstimationMapper(Mapper):
         )
 
         if self.if_save_visualization:
-            video_name = os.path.basename(sample[self.video_key][0])
+            video_name = os.path.basename(video_path)
             os.makedirs(self.save_visualization_dir, exist_ok=True)
             processed_video_path = os.path.join(
                 self.save_visualization_dir, os.path.splitext(video_name)[0] + "_src.mp4"

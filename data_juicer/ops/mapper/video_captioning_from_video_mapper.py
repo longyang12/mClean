@@ -187,8 +187,9 @@ class VideoCaptioningFromVideoMapper(Mapper):
 
         # load videos
         loaded_video_keys = ori_sample[self.video_key]
-        sample, videos = load_data_with_context(ori_sample, context,
-                                                loaded_video_keys, load_video)
+        sample, videos = load_data_with_context(
+            ori_sample, context, loaded_video_keys, load_video, mm_bytes_key=self.video_bytes_key
+        )
 
         text = sample[self.text_key]
         offset = 0

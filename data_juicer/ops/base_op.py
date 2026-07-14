@@ -152,6 +152,8 @@ class OP:
             to be processed
         :param image_bytes_key: the key name of field that stores sample image bytes list
             to be processed
+        :param video_bytes_key: the key name of field that stores sample video bytes list
+            to be processed
         :param query_key: the key name of field that stores sample queries
         :param response_key: the key name of field that stores responses
         :param history_key: the key name of field that stores history of
@@ -186,6 +188,7 @@ class OP:
 
         # extra mm bytes keys
         self.image_bytes_key = kwargs.get("image_bytes_key", "image_bytes")
+        self.video_bytes_key = kwargs.get("video_bytes_key", "video_bytes")
 
         self.system_key = kwargs.get("system_key", "system")
         self.instruction_key = kwargs.get("instruction_key", "instruction")

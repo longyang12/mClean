@@ -9,7 +9,7 @@ from pydantic import PositiveInt
 from data_juicer.utils.constant import Fields, MetaKeys
 from data_juicer.utils.lazy_loader import LazyLoader
 from data_juicer.utils.mm_utils import (
-    image_path_to_base64,
+    image_to_base64,
     load_data_with_context,
     load_image,
 )
@@ -172,9 +172,11 @@ Verify text relevance before combining with visual elements. If text is missing 
             sample[Fields.meta][self.tag_field_name] = np.array([[]], dtype=np.str_)
             return sample
 
-        # load videos
+        # load images
         loaded_image_keys = sample[self.image_key]
-        sample, images = load_data_with_context(sample, context, loaded_image_keys, load_image)
+        sample, images = load_data_with_context(
+            sample, context, loaded_image_keys, load_image, mm_bytes_key=self.image_bytes_key
+        )
 
         if self.is_api_model:
             model = get_model(self.model_key, rank, self.use_cuda())
@@ -182,13 +184,13 @@ Verify text relevance before combining with visual elements. If text is missing 
             model, _ = get_model(self.model_key, rank, self.use_cuda())
 
         tags_list = []
-        for img in images:
+        for img in images.values():
             input_prompt = self.input_template.format(text=sample.get(self.text_key, ""))
             user_content = [
                 {"type": "text", "text": input_prompt},
                 {
                     "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{image_path_to_base64(img)}"},
+                    "image_url": {"url": f"data:image/jpeg;base64,{image_to_base64(img)}"},
                 },
             ]
             messages = []

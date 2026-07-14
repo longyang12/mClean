@@ -4,18 +4,31 @@
 
 # global parameters
 project_name: 'all'                                         # project name for distinguish your configs
+
+# on qz
 dataset_path: '/inspire/hdd/project/smartsoftware/yanglong-253108120134/datasets/MSR-VTT/data/msrvtt_train_dj_part1.jsonl'
                                                             # accepted format: 'weight1(optional) dataset1-path weight2(optional) dataset2-path'
 export_path: '/inspire/hdd/project/smartsoftware/yanglong-253108120134/datasets/MSR-VTT/processed_data/gpu/np1/cache/processed_sample.jsonl'
+
+# on mac
+dataset_path: '/Users/long/Desktop/projects/mClean/data/datasets/MSR-VTT/data/msrvtt_train_dj_part1.jsonl'  # path to your dataset directory or file
+export_path: '/Users/long/Desktop/projects/mClean/data/datasets/MSR-VTT/processed_data/mac/np1/cache/processed_sample.jsonl'
+
 np: 1                                                       # number of subprocess to process your dataset
                                                             # Note: currently, we support specify only ONE key for each op, for cases requiring multiple keys, users can specify the op multiple times. We will only use the first key of `text_keys` when you set multiple keys.
-open_tracer: true                                          # whether to open the tracer to trace the changes during process. It might take more time when opening tracer
+open_tracer: false                                          # whether to open the tracer to trace the changes during process. It might take more time when opening tracer
 use_cache: true
-ds_cache_dir: /inspire/hdd/project/smartsoftware/yanglong-253108120134/cache/MSR-VTT/gpu/np1/cache
 
+# on qz
+# ds_cache_dir: /inspire/hdd/project/smartsoftware/yanglong-253108120134/cache/MSR-VTT/gpu/np1/cache
+
+# on mac
+ds_cache_dir: /Users/long/Desktop/projects/mClean/data/cache/MSR-VTT/gpu/np1/cache
 
 # for multimodal data processing
-video_key: 'videos'                                         # key name of field to store the list of sample video paths.
+video_key: 'videos'   
+video_bytes_key: 'video_bytes'
+materialize_video_bytes: true                                      # key name of field to store the list of sample video paths.
 video_special_token: '<__dj__video>'                        # the special token that represents a video in the text. In default, it's "<__dj__video>". You can specify your own special token according to your input dataset.
 
 eoc_special_token: '<|__dj__eoc|>'                          # the special token that represents the end of a chunk in the text. In default, it's "<|__dj__eoc|>". You can specify your own special token according to your input dataset.

@@ -3,6 +3,7 @@ from typing import Dict, List, Optional
 from data_juicer.utils.constant import Fields
 from data_juicer.utils.file_utils import transfer_filename
 from data_juicer.utils.lazy_loader import LazyLoader
+from data_juicer.utils.mm_utils import get_video_path_from_sample
 
 from ..base_op import OPERATORS, Mapper
 
@@ -71,12 +72,13 @@ class VideoFFmpegWrappedMapper(Mapper):
 
         loaded_video_keys = sample[self.video_key]
         processed = {}
-        for video_key in loaded_video_keys:
+        for index, video_key in enumerate(loaded_video_keys):
             if video_key in processed:
                 continue
 
             output_key = transfer_filename(video_key, OP_NAME, self.save_dir, **self._init_parameters)
-            stream = ffmpeg.input(video_key).filter(self.filter_name, **self.filter_kwargs).output(output_key)
+            video_path = get_video_path_from_sample(sample, index, video_key, self.video_bytes_key)
+            stream = ffmpeg.input(video_path).filter(self.filter_name, **self.filter_kwargs).output(output_key)
             if self.global_args is not None:
                 stream = stream.global_args(*self.global_args)
             stream.run(capture_stderr=self.capture_stderr, overwrite_output=self.overwrite_output)
@@ -89,4 +91,6 @@ class VideoFFmpegWrappedMapper(Mapper):
                     sample[Fields.source_file][i] = value
 
         sample[self.video_key] = [processed[key] for key in loaded_video_keys]
+        if self.video_bytes_key in sample:
+            sample.pop(self.video_bytes_key, None)
         return sample

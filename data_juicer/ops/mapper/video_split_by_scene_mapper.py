@@ -7,7 +7,7 @@ from pydantic import NonNegativeFloat, NonNegativeInt
 from data_juicer.utils.constant import Fields
 from data_juicer.utils.file_utils import add_suffix_to_filename, transfer_filename
 from data_juicer.utils.lazy_loader import LazyLoader
-from data_juicer.utils.mm_utils import SpecialTokens
+from data_juicer.utils.mm_utils import SpecialTokens, get_video_path_from_sample
 
 from ..base_op import OPERATORS, Mapper
 
@@ -111,17 +111,20 @@ class VideoSplitBySceneMapper(Mapper):
         output_video_keys = {}
         scene_counts = {}
 
-        for video_key in loaded_video_keys:
+        for index, video_key in enumerate(loaded_video_keys):
             # skip duplicate
             if video_key in output_video_keys:
                 continue
 
+            video_path = get_video_path_from_sample(sample, index, video_key, self.video_bytes_key)
             redirected_video_key = transfer_filename(video_key, OP_NAME, self.save_dir, **self._init_parameters)
             output_template = add_suffix_to_filename(redirected_video_key, "_$SCENE_NUMBER")
 
             # detect scenes
             detector = self.detector_class(self.threshold, self.min_scene_len, **self.detector_kwargs)
-            scene_list = scenedetect.detect(video_key, detector, show_progress=self.show_progress, start_in_scene=True)
+            scene_list = scenedetect.detect(
+                video_path, detector, show_progress=self.show_progress, start_in_scene=True
+            )
             scene_counts[video_key] = len(scene_list)
 
             if len(scene_list) > 1:
@@ -132,7 +135,7 @@ class VideoSplitBySceneMapper(Mapper):
                 ]
                 # split video into clips
                 scenedetect.split_video_ffmpeg(
-                    input_video_path=video_key,
+                    input_video_path=video_path,
                     scene_list=scene_list,
                     output_file_template=output_template,
                     show_progress=self.show_progress,
@@ -157,4 +160,6 @@ class VideoSplitBySceneMapper(Mapper):
             sample[Fields.source_file].extend([value] * len(output_video_keys[value]))
 
         sample[self.video_key] = list(chain.from_iterable([output_video_keys[key] for key in loaded_video_keys]))
+        if self.video_bytes_key in sample:
+            sample.pop(self.video_bytes_key, None)
         return sample
