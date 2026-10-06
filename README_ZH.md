@@ -1,163 +1,310 @@
-[[英文主页]](README.md) | [[DJ-Cookbook]](docs/tutorial/DJ-Cookbook_ZH.md) | [[算子池]](docs/Operators.md) | [[API]](https://datajuicer.github.io/data-juicer/zh_CN/main/api) | [[Awesome LLM Data]](docs/awesome_llm_data.md)
+# DecoupDAG: Eliminating Compute Redundancy in Iterative Data Curation via Operator Decoupling
 
-# Data Processing for and with Foundation Models
+**DecoupDAG** 是我们准备投稿 SIGMOD 的论文工作的开源研究项目，用于构建可复用、可缓存的数据清洗流水线。本项目是在 [Data-Juicer](https://github.com/datajuicer/data-juicer) 基础上的**源码级二次开发**：保留 Data-Juicer 的配置驱动算子体系、Hugging Face Datasets 执行模型，以及文本和多模态数据支持，并针对论文实验扩展算子执行和指纹计算机制。
 
- <img src="https://img.alicdn.com/imgextra/i1/O1CN01fUfM5A1vPclzPQ6VI_!!6000000006165-0-tps-1792-1024.jpg" width = "533" height = "300" alt="Data-Juicer"/>
+大规模数据清洗中，一个 Filter 通常先为每个样本计算昂贵的统计特征（例如困惑度、重复率），再根据阈值删除样本。传统执行方式把这两个步骤绑定在一起，修改阈值或调整算子顺序时会重复计算已经有效的特征。DecoupDAG 将二者拆成独立的可缓存阶段，并对兼容的连续 Filter 组采用“先计算特征、后执行过滤”的顺序。
 
-![](https://img.shields.io/badge/language-Python-214870.svg)
-![](https://img.shields.io/badge/license-Apache--2.0-000000.svg)
-[![pypi version](https://img.shields.io/pypi/v/py-data-juicer?logo=pypi&color=026cad)](https://pypi.org/project/py-data-juicer)
-[![Docker version](https://img.shields.io/docker/v/datajuicer/data-juicer?logo=docker&label=Docker&color=498bdf)](https://hub.docker.com/r/datajuicer/data-juicer)
-[![Docker on OSS](https://img.shields.io/badge/OSS%20latest-none?logo=docker&label=Docker&color=498bdf)](https://dail-wlcb.oss-cn-wulanchabu.aliyuncs.com/data_juicer/docker_images/data-juicer-latest.tar.gz)
-![](https://img.shields.io/endpoint?url=https%3A%2F%2Fgist.githubusercontent.com%2FHYLcool%2Ff856b14416f08f73d05d32fd992a9c29%2Fraw%2Ftotal_cov.json)
+[![Python](https://img.shields.io/badge/Python-%3E%3D3.10-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![License](https://img.shields.io/badge/License-Apache--2.0-000000.svg)](LICENSE)
 
-[![DataModality](https://img.shields.io/badge/DataModality-Text,Image,Audio,Video-brightgreen.svg)](https://datajuicer.github.io/data-juicer/en/main/docs/tutorial/DJ-Cookbook.html)
-[![Usage](https://img.shields.io/badge/Usage-Cleaning,Synthesis,Analysis-FFD21E.svg)](https://datajuicer.github.io/data-juicer/en/main/docs/hub/RecipeGallery.html)
-[![PyPI Downloads](https://static.pepy.tech/personalized-badge/py-data-juicer?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/py-data-juicer)
+> 本仓库不包含论文实验使用的数据集。运行 recipe 前请先阅读[数据集与路径](#数据集与路径)。
 
+英文版：[`README.md`](README.md)
 
+## 项目改动概览
 
-[![算子池](https://img.shields.io/badge/文档-算子池-blue?logo=Markdown)](https://datajuicer.github.io/data-juicer/en/main/docs/Operators.html)
-[![Paper](http://img.shields.io/badge/cs.LG-1.0Paper(SIGMOD'24)-B31B1B?logo=arxiv&logoColor=red)](https://arxiv.org/abs/2309.02033)
-[![Paper](http://img.shields.io/badge/cs.AI-2.0Paper(NeurIPS'25)-B31B1B?logo=arxiv&logoColor=red)](https://arxiv.org/abs/2501.14755)
+DecoupDAG 在 Data-Juicer 上增加了三个相互配合的部分：
 
+1. **算子解耦。** 将产生统计量的 `Filter` 拆成特征阶段（`compute_stats`）和归约阶段（`process`）。特征阶段把统计结果写入 Data-Juicer 的 `__dj__stats__` 列，归约阶段根据配置的保留条件决定哪些行继续保留。
+2. **算子先特征后过滤的重排。** 对一段连续且可重排的 Filter，DecoupDAG 将 `f1, f2, ..., fn` 改写为 `f1.feature, f2.feature, ..., fn.feature, f1.reduce, f2.reduce, ..., fn.reduce`。这样可以在删除行之前一次性计算昂贵特征。Mapper、Deduplicator 以及注册在 `NON_STATS_FILTERS` 中的非统计 Filter 保持原位置，并作为重排边界。
+3. **细粒度的阶段/列感知哈希。** 为特征阶段和归约阶段生成独立的 Hugging Face Dataset fingerprint。特征 fingerprint 排除只影响阈值的参数，归约 fingerprint 保留阈值和区间参数；只改阈值时可以复用统计列缓存，只重新执行轻量的归约阶段。
 
+实现仍然采用配置驱动方式，可处理文本、图像、音频和视频 recipe。论文实验对应的配置位于 [`data-recipes/`](data-recipes/)。
 
-Data-Juicer 是一个一站式系统，面向大模型的文本及多模态数据处理。我们提供了一个基于 JupyterLab 的 [Playground](http://8.138.149.181/)，您可以从浏览器中在线试用 Data-Juicer。 如果Data-Juicer对您的研发有帮助，请支持加星（自动订阅我们的新发布）、以及引用我们的[工作](#参考文献) 。
+## 系统流程
 
-[阿里云人工智能平台 PAI](https://www.aliyun.com/product/bigdata/learn) 已深度集成Data-Juicer到其数据处理产品中。PAI提供包含数据集管理、算力管理、模型工具链、模型开发、模型训练、模型部署、AI资产管理在内的功能模块，为用户提供高性能、高稳定、企业级的大模型工程化能力。数据处理的使用文档请参考：[快速提交DataJuicer任务](https://www.alibabacloud.com/help/zh/pai/user-guide/quickly-submit-a-datajuicer-task)。
+```mermaid
+flowchart LR
+    A[输入数据集] --> B[Data-Juicer 加载器]
+    B --> C[Mapper / Deduplicator]
+    C --> D[连续统计型 Filter]
+    D --> E[特征阶段\nDataset.map(compute_stats)]
+    E --> F[归约阶段\nDataset.filter(process)]
+    F --> G[导出结果]
+    E -. 缓存 .-> H[HF Datasets cache]
+    F -. 缓存 .-> H
+```
 
-Data-Juicer正在积极更新和维护中，我们将定期强化和新增更多的功能和数据菜谱。热烈欢迎您[加入我们](#贡献与致谢)，一起推进大模型的数据-模型协同开发和研究应用！
+`normal` 模式下，每个 Filter 会连续执行自己的特征和归约阶段。`feature_first` 模式下，`DefaultExecutor` 只重写连续的统计型 `Filter`；特征块内部和归约块内部的顺序保持不变，不会跨越 Mapper 或非统计 Filter 移动算子。
 
-[Demo Video] DataJuicer-Agent:数据处理，即刻启程！
+## 核心实现
 
-https://github.com/user-attachments/assets/6eb726b7-6054-4b0c-905e-506b2b9c7927
+### 1. Filter 解耦
 
-[Demo Video] DataJuicer-Sandbox: 降本增效，优化数据-模型协同开发！
+Data-Juicer 原始的 `Filter.run` 会把计算统计量的 map 和消费统计量的 filter 连在一起。DecoupDAG 保留原有公共接口，并增加两个显式阶段：
 
-https://github.com/user-attachments/assets/a45f0eee-0f0e-4ffe-9a42-d9a55370089d
+- `Filter.run_feature_stage(dataset, exporter=None)` 调用 `Dataset.map(self.compute_stats, ...)`，并附加特征 fingerprint。
+- `Filter.run_reduce_stage(dataset, tracer=None)` 调用 `Dataset.filter(self.process, ...)`，并附加归约 fingerprint。
+- `Filter.run(...)` 仍然保留，用于普通的连续执行路径。
 
+[`data_juicer/ops/filter_reorder.py`](data_juicer/ops/filter_reorder.py) 中的 `FilterFeatureOp` 和 `FilterReduceOp` 是对同一个底层 Filter 的轻量包装。它们转发算子属性，并为阶段提供独立名称和配置，便于执行日志和 checkpoint 记录。
 
-----
+对一个可重排的 Filter 组，执行逻辑可以表示为：
 
-## 新消息
-- 🎉 [2025-09-19] 我们的 [Data-Juicer 2.0: Cloud-Scale Adaptive Data Processing for and with Foundation Models](https://arxiv.org/abs/2501.14755) 已被接收为 **NeurIPS'25 Spotlight**（处于所有投稿中的前 3.1%）！
-- 🎉 [2025-09-19] 我们关于数据配比/选择/合成的两个工作：[Diversity as a Reward: Fine-Tuning LLMs on a Mixture of Domain-Undetermined Data](https://arxiv.org/abs/2502.04380) 和 [MindGYM: What Matters in Question Synthesis for Thinking-Centric Fine-Tuning?](https://arxiv.org/abs/2503.09499)，已被 **NeurIPS'25** 接收！
-- 🛠️ [2025-06-04] 如何在“经验时代”处理反馈数据？我们提出了 [Trinity-RFT: A General-Purpose and Unified Framework for Reinforcement Fine-Tuning of LLMs](https://arxiv.org/abs/2505.17826)，该框架利用 Data-Juicer 为 RFT 场景量身定制数据处理管道。
-- 🎉 [2025-06-04] 我们的 [Data-Model Co-development 综述](https://ieeexplore.ieee.org/document/11027559) 已被 IEEE Transactions on Pattern Analysis and Machine Intelligence（**TPAMI**）接收！欢迎探索并贡献[awesome-list](https://datajuicer.github.io/data-juicer/en/main/docs/awesome_llm_data.html)。
-- 🔎 [2025-06-04] 我们推出了 [DetailMaster: Can Your Text-to-Image Model Handle Long Prompts?](https://www.arxiv.org/abs/2505.16915) 一项合成基准测试，揭示了大模型虽擅长处理短描述，但在长提示下性能显著下降的问题。
-- 🎉 [2025-05-06] 我们的 [Data-Juicer Sandbox](https://arxiv.org/abs/2407.11784) 已被接收为 **ICML'25 Spotlight**（处于所有投稿中的前 2.6%）！
-- 💡 [2025-03-13] 我们提出[MindGYM: What Matters in Question Synthesis for Thinking-Centric Fine-Tuning?](https://arxiv.org/abs/2503.09499)。一种新的数据合成方法鼓励大模型自我合成高质量、低方差数据，实现高效SFT（如仅使用 *400 个样本* 即可在 [MathVision](https://mathllm.github.io/mathvision/#leaderboard) 上获得 *16%* 的增益）。
-- 🤝 [2025-02-28] DJ 已被集成到 [Ray官方 Ecosystem](https://docs.ray.io/en/latest/ray-overview/ray-libraries.html) 和 [Example Gallery](https://docs.ray.io/en/latest/ray-more-libs/data_juicer_distributed_data_processing.html)。此外，我们在 DJ2.0 中的流式 JSON 加载补丁已被 [Apache Arrow 官方集成](https://github.com/apache/arrow/pull/45084)。
-- 🎉 [2025-02-27] 我们的对比数据合成工作， [ImgDiff](https://arxiv.org/pdf/2408.04594)， 已被 **CVPR'25** 接收！
-- 💡 [2025-02-05] 我们提出了一种新的数据选择方法 [Diversity as a Reward: Fine-Tuning LLMs on a Mixture of Domain-Undetermined Data](https://www.arxiv.org/abs/2502.04380)，该方法基于理论指导，将数据多样性建模为奖励信号，在 7 个基准测试中，微调 SOTA LLMs 取得了更好的整体表现。
-- 🎉 [2025-01-11] 我们发布了 2.0 版论文 [Data-Juicer 2.0: Cloud-Scale Adaptive Data Processing for and with Foundation Models](https://arxiv.org/abs/2501.14755)。DJ现在可以使用阿里云集群中 50 个 Ray 节点上的 6400 个 CPU 核心在 2.1 小时内处理 70B 数据样本，并使用 8 个 Ray 节点上的 1280 个 CPU 核心在 2.8 小时内对 5TB 数据进行重复数据删除。
+```text
+D0 = 输入数据集
+D1 = map(compute_stats_1, D0)  # f1.feature
+D2 = map(compute_stats_2, D1)  # f2.feature
+...
+Dk = filter(process_1, Dk-1)   # f1.reduce
+Dk+1 = filter(process_2, Dk)   # f2.reduce
+...
+```
 
-<details>
-<summary> History News:
-</summary>>
+特征阶段写入或扩展 `__dj__stats__`，归约阶段只判断行是否保留。这样，当只修改阈值时，已经计算好的统计量可以直接复用。
 
-- [2025-01-03] 我们通过 20 多个相关的新 [OP](https://github.com/datajuicer/data-juicer/releases/tag/v1.0.2) 以及与 LLaMA-Factory 和 ModelScope-Swift 兼容的统一 [数据集格式](https://github.com/datajuicer/data-juicer/releases/tag/v1.0.3) 更好地支持Post-Tuning场景。
-- [2024-12-17] 我们提出了 *HumanVBench*，它包含 16 个以人为中心的任务，使用合成数据，从内在情感和外在表现的角度对22个视频 MLLM 的能力进行基准测试。请参阅我们的 [论文](https://arxiv.org/abs/2412.17574) 中的更多详细信息，并尝试使用它 [评估](https://github.com/datajuicer/data-juicer/tree/HumanVBench) 您的模型。
-- [2024-11-22] 我们发布 DJ [v1.0.0](https://github.com/datajuicer/data-juicer/releases/tag/v1.0.0)，其中我们重构了 Data-Juicer 的 *Operator*、*Dataset*、*Sandbox* 和许多其他模块以提高可用性，例如支持容错、FastAPI 和自适应资源管理。
-- [2024-08-25] 我们在 KDD'2024 中提供了有关多模态 LLM 数据处理的[教程](https://datajuicer.github.io/data-juicer/_static/tutorial_kdd24.html)。
-- [2024-08-09] 我们提出了Img-Diff，它通过*对比数据合成*来增强多模态大型语言模型的性能，在[MMVP benchmark](https://tsb0601.github.io/mmvp_blog/)中比GPT-4V高出12个点。 更多细节请参阅我们的 [论文](https://arxiv.org/abs/2408.04594), 以及从 [huggingface](https://huggingface.co/datasets/datajuicer/Img-Diff) 和 [modelscope](https://modelscope.cn/datasets/Data-Juicer/Img-Diff)下载这份数据集。
-- [2024-07-24] "天池 Better Synth 多模态大模型数据合成赛"——第四届Data-Juicer大模型数据挑战赛已经正式启动！立即访问[竞赛官网](https://tianchi.aliyun.com/competition/entrance/532251)，了解赛事详情。
-- [2024-07-17] 我们利用Data-Juicer[沙盒实验室套件](https://datajuicer.github.io/data-juicer-sandbox/zh_CN/main/index_ZH.html)，通过数据与模型间的系统性研发工作流，调优数据和模型，在[VBench](https://huggingface.co/spaces/Vchitect/VBench_Leaderboard)文生视频排行榜取得了新的榜首。相关成果已经整理发表在[论文](http://arxiv.org/abs/2407.11784)中，并且模型已在[ModelScope](https://modelscope.cn/models/Data-Juicer/Data-Juicer-T2V)和[HuggingFace](https://huggingface.co/datajuicer/Data-Juicer-T2V)平台发布。
-- [2024-07-12] 我们的MLLM-Data精选列表已经演化为一个模型-数据协同开发的角度系统性[综述](https://arxiv.org/abs/2407.08583)。欢迎[浏览](docs/awesome_llm_data.md)或参与贡献!
-- [2024-06-01] ModelScope-Sora"数据导演"创意竞速——第三届Data-Juicer大模型数据挑战赛已经正式启动！立即访问[竞赛官网](https://tianchi.aliyun.com/competition/entrance/532219)，了解赛事详情。
-- [2024-03-07] 我们现在发布了 **Data-Juicer [v0.2.0](https://github.com/datajuicer/data-juicer/releases/tag/v0.2.0)**! 在这个新版本中，我们支持了更多的 **多模态数据(包括视频)** 相关特性。我们还启动了 **[DJ-SORA](docs/DJ_SORA_ZH.md)** ，为SORA-like大模型构建开放的大规模高质量数据集！
-- [2024-02-20] 我们在积极维护一份关于LLM-Data的*精选列表*，欢迎[访问](docs/awesome_llm_data.md)并参与贡献！
-- [2024-02-05] 我们的论文被SIGMOD'24 industrial track接收！
-- [2024-01-10] 开启"数据混合"新视界——第二届Data-Juicer大模型数据挑战赛已经正式启动！立即访问[竞赛官网](https://tianchi.aliyun.com/competition/entrance/532174)，了解赛事详情。
-- [2024-01-05] **Data-Juicer v0.1.3** 版本发布了。 
-在这个新版本中，我们支持了**更多Python版本**（3.8-3.10），同时支持了**多模态**数据集的[转换](tools/fmt_conversion/multimodal/README_ZH.md)和[处理](docs/Operators.md)（包括文本、图像和音频。更多模态也将会在之后支持）！
-此外，我们的论文也更新到了[第三版](https://arxiv.org/abs/2309.02033) 。
-- [2023-10-13] 我们的第一届以数据为中心的 LLM 竞赛开始了！
-  请访问大赛官网，FT-Data Ranker（[1B赛道](https://tianchi.aliyun.com/competition/entrance/532157) 、[7B赛道](https://tianchi.aliyun.com/competition/entrance/532158) ) ，了解更多信息。
-</details>
+### 2. `feature_first` 重排
 
+通过下面的配置项启用：
 
+```yaml
+filter_execution_mode: feature_first
+```
 
-## 为什么选择 Data-Juicer？
+入口位于 [`data_juicer/core/executor/default_executor.py`](data_juicer/core/executor/default_executor.py)，重排逻辑位于 [`data_juicer/ops/filter_reorder.py`](data_juicer/ops/filter_reorder.py) 的 `rewrite_filter_ops_feature_first`：
 
-<img src="https://img.alicdn.com/imgextra/i4/O1CN015URK6i21KU3XdkUpK_!!6000000006966-2-tps-3994-3956.png" align="center" width="500" />
+1. 按 recipe 原始顺序加载算子。
+2. 找到由统计型 `Filter` 组成的最长连续片段。
+3. 将每个片段替换为“全部 feature wrapper + 全部 reduce wrapper”。
+4. 其他算子保持原位置。
 
-- **系统化和可重用**：
-系统化地为用户提供 100 多个核心 [算子](docs/Operators.md) 和 50 多个可重用的数据菜谱和
-专用工具套件，旨在解耦于特定的多模态 LLM 数据集和处理管道运行。支持预训练、后训练、英语、中文等场景中的数据分析、清洗和合成。
+[`data_juicer/config/config.py`](data_juicer/config/config.py) 会校验执行模式。当前版本中，`feature_first` 与 checkpoint、operator fusion 不兼容，因此配置初始化时会发出警告并自动关闭这两项。
 
-- **易用、可扩展**：
-简洁灵活，提供快速[入门指南](docs/tutorial/QuickStart_ZH.md)和包含丰富使用示例的[DJ-Cookbook](docs/tutorial/DJ-Cookbook_ZH.md)。您可以灵活实现自己的OP，[自定义](docs/DeveloperGuide_ZH.md)数据处理工作流。
+### 3. 细粒度阶段/列级别 fingerprint
 
-  Data-Juicer 现采用 AI 自动重写和优化算子的 docstring，并生成详细的算子文档，帮助更快理解每个算子的功能及用法。  
-  如需了解该文档增强流程的具体实现，欢迎访问 [op_doc_enhance_workflow](https://github.com/datajuicer/data-juicer/tree/main/docs/op_doc_enhance_workflow)。
+每个阶段的 fingerprint 由输入数据集 fingerprint 和语义阶段签名确定。 [`data_juicer/utils/fingerprint_utils.py`](data_juicer/utils/fingerprint_utils.py) 中的 `generate_stage_fingerprint` 可以概括为：
 
-- **高效、稳定**：提供性能优化的[并行数据处理能力](docs/Distributed_ZH.md)（Aliyun-PAI\Ray\CUDA\OP Fusion），
-更快、更少资源消耗，基于大规模生产环境打磨。
+```text
+stage_fp = xxhash64(
+    input_dataset_fp,
+    {
+        "type": "decoupled_filter_stage",
+        "op_name": operator_name,
+        "stage": "feature" | "reduce"
+    },
+    normalize(stage_signature)
+)
+```
 
-- **效果验证、沙盒**：支持数据模型协同开发，通过[沙盒实验室](https://datajuicer.github.io/data-juicer-sandbox/zh_CN/main/index_ZH.html)实现快速迭代，提供反馈循环、可视化等功能，让您更好地理解和改进数据和模型。已经有许多基于 DJ 衍生的数据菜谱和模型经过了效用验证，譬如在预训练、文生视频、图文生成等场景。
-![Data-in-the-loop](https://img.alicdn.com/imgextra/i2/O1CN017U7Zz31Y7XtCJ5GOz_!!6000000003012-0-tps-3640-1567.jpg)
+[`data_juicer/ops/base_op.py`](data_juicer/ops/base_op.py) 负责拆分签名：
 
-## 文档
+- `get_feature_signature()` 删除阈值类参数：`min_*`、`max_*`、`*_threshold`、`threshold`，以及 `min_closed_interval`、`max_closed_interval`、`reversed_range`。
+- `get_threshold_signature()` 保留上述阈值和区间语义；如果算子没有可识别的阈值参数，则使用完整算子配置作为归约签名。
+- 两类 fingerprint 作为 `new_fingerprint` 传给 `Dataset.map` 和 `Dataset.filter`，使 Hugging Face Datasets 可以独立寻址两个阶段的缓存。
 
-详细文档请看[此处](https://datajuicer.github.io/data-juicer/zh_CN/main/docs_index_ZH.html)。
+在阶段 fingerprint 之外，`generate_column_fingerprint` 和
+`generate_column_fingerprints` 会为每个逻辑统计列单独生成 fingerprint。每个列的
+fingerprint 由输入数据集 fingerprint、算子名称、执行阶段、列名和归一化后的特征签名共同决定。
+`Filter.run_feature_stage` 会从 `__dj__stats__` 中收集本次产生的统计 key，并在可访问的
+feature-stage 数据集上保存 `_dj_column_fingerprints`。因此，分析器可以观察到每个统计列的
+失效范围；物理 Arrow cache 仍然使用 map/filter 的 stage fingerprint。
+
+统计列（`Fields.stats == "__dj__stats__"`）是特征阶段的物化边界。也就是说，DecoupDAG 在统计列这个语义边界上实现列级别复用；Hugging Face Datasets 在物理层面可能把完整 Arrow 表记录放在一个 cache 文件中，但缓存失效由统计阶段的签名驱动，而不是把整条 pipeline 当作不可分割的黑盒。只修改阈值会改变归约 key，不会使特征 key 失效；修改特征参数则会按预期重新计算特征阶段。
+
+哈希前会在 [`data_juicer/utils/fingerprint_utils.py`](data_juicer/utils/fingerprint_utils.py) 中进行稳定归一化：
+
+- 字典按 key 排序，嵌套值递归归一化；
+- 路径、bytes、NumPy 标量、set、list、tuple 使用稳定表示；
+- callable 会记录 module、限定名、wrapper 深度、代码位置和绑定算子的语义状态；
+- 进程数、batch size、内存限制和 Ray runtime environment 等运行时参数不会进入算子语义状态。
+
+[`data_juicer/core/data/dj_dataset.py`](data_juicer/core/data/dj_dataset.py) 会记录每次 `map`/`filter` 的输入 fingerprint、请求 fingerprint、输出 fingerprint、行数、cache 文件数量和 callable identity，便于检查命中与失效原因。
+
+最小实现检查可以运行：
+
+```bash
+pytest -q tests/utils/test_fingerprint_utils.py tests/ops/test_filter_reorder.py
+```
+
+## 安装
+
+DecoupDAG 要求 Python 3.10 或更高版本，锁文件记录了仓库使用的环境。
+
+```bash
+git clone https://github.com/longyang12/DecoupDAG.git
+cd DecoupDAG
+
+# 推荐：使用 uv 按锁文件安装。
+uv sync
+
+# 或使用 pip 安装可编辑包。
+python -m pip install -e .
+```
+
+根据使用的 recipe 安装可选依赖：
+
+```bash
+# 使用 SimHash 和 NLP 工具的文本 recipe。
+python -m pip install -e ".[nlp]"
+
+# 多模态 recipe。
+python -m pip install -e ".[nlp,vision]"
+
+# Ray 执行（可选）。
+python -m pip install -e ".[distributed]"
+```
+
+`all` extra 会安装全部可选依赖，体积较大。GPU 算子还需要匹配的 PyTorch/CUDA 环境。
+
+## 快速开始
+
+### 运行论文 recipe
+
+仓库中的 recipe 含有特定机器上的数据、输出和缓存路径。运行前请复制配置并修改 `dataset_path`、`export_path`、`ds_cache_dir`：
+
+```bash
+cp data-recipes/redpajama-arxiv-refine-cpu-np1-cache.yaml /tmp/decoupdag-arxiv.yaml
+# 编辑 /tmp/decoupdag-arxiv.yaml，填写本机有效的输入、输出和缓存路径。
+python tools/process_data.py --config /tmp/decoupdag-arxiv.yaml
+```
+
+启用缓存的 arXiv 配置已经包含：
+
+```yaml
+use_cache: true
+filter_execution_mode: feature_first
+```
+
+要运行未优化的 baseline，在相同数据和算子参数下将 `filter_execution_mode` 改为 `normal` 或删除该配置项。对比实验时请保持数据、缓存目录和软件环境一致。
+
+### 最小配置
+
+下面的配置除输入文件外不依赖仓库中的固定路径：
+
+```yaml
+project_name: decoupdag-demo
+dataset_path: ./data/input.jsonl
+export_path: ./outputs/clean.jsonl
+ds_cache_dir: ./outputs/cache
+use_cache: true
+np: 4
+open_tracer: true
+filter_execution_mode: feature_first
+
+process:
+  - clean_email_mapper:
+  - alphanumeric_filter:
+      tokenization: false
+      min_ratio: 0.10
+      max_ratio: 0.95
+  - words_num_filter:
+      lang: en
+      tokenization: true
+      min_num: 5
+      max_num: 100000
+```
+
+运行：
+
+```bash
+python tools/process_data.py --config path/to/decoupdag-demo.yaml
+```
+
+再次运行相同配置，可以观察 `map`/`filter` 阶段缓存的复用。`NestedDataset` 输出的日志会显示每个阶段使用的 fingerprint。
+
+## 复现实验
+
+### Recipe
+
+仓库提供主要工作负载的 CPU/GPU、cache/no-cache 配置：
+
+| 工作负载 | Recipe 家族 | 主要算子 |
+| --- | --- | --- |
+| RedPajama arXiv | `redpajama-arxiv-refine-cpu-np1-{cache,nocache}.yaml` | 文本规范化、质量过滤、SimHash 去重 |
+| RedPajama C4 | `redpajama-c4-refine-cpu-np1-{cache,nocache}.yaml` | 文本规范化、质量过滤、SimHash 去重 |
+| RedPajama code | `redpajama-code-refine-cpu-np1-{cache,nocache}.yaml` | 面向代码的长度/重复过滤、SimHash 去重 |
+| StackExchange | `redpajama-stackexchange-refine-cpu-np1-{cache,nocache}.yaml` | 语言/质量过滤、SimHash 去重 |
+| Wikipedia | `redpajama-wiki-refine-cpu-np1-{cache,nocache}.yaml` | 语言/质量过滤、SimHash 去重 |
+| LLaVA 预训练 | `llava-pretrain-refine-{cpu,gpu}-np1-{cache,nocache}.yaml` | 多模态图文过滤 |
+| MSR-VTT | `msr-vtt-refine-{cpu,gpu}-np1-{cache,nocache}.yaml` | 视频质量、运动、NSFW、水印和图文/视频过滤 |
+
+文件名中的 `cache` 表示启用缓存，`nocache` 用于测量重复计算成本。`np1` 配置使用一个本地 worker，便于复现论文测量；只有在有意改变实验设置时才调整 `np`。
+
+### 运行脚本
+
+- [`run_base_pipeline.sh`](run_base_pipeline.sh)：包含主要 recipe 的 cache/no-cache 执行顺序；使用前请修改绝对路径。
+- [`run_cpu.sh`](run_cpu.sh) 和 [`run_gpu.sh`](run_gpu.sh)：CPU/GPU 实验命令列表。
+- [`run_test.sh`](run_test.sh)：本地小规模运行脚本，其中也包含需要修改的绝对路径。
+
+所有输入数据、模型 checkpoint 和生成结果都被 Git 忽略。请按照数据集提供方的官方说明下载，并遵守相应的许可证和访问条款。
+
+## 数据集与路径
+
+仓库不分发论文实验数据。运行 recipe 前需要：
+
+1. 从对应数据集的官方来源获取数据，并确认使用权限。
+2. 将 recipe 中的 `dataset_path` 改为本机路径。
+3. 将 `export_path` 和 `ds_cache_dir` 指向有足够空间的目录。
+4. 对需要模型的多模态算子安装可选依赖并准备模型权重。
+
+缓存可能包含完整的中间 Arrow 数据，规模会接近甚至超过输入数据规模；请为 `ds_cache_dir` 预留空间。
+
+## 代码结构
+
+```text
+DecoupDAG/
+├── data_juicer/
+│   ├── core/data/dj_dataset.py           # Dataset 包装、fingerprint 日志
+│   ├── core/executor/default_executor.py # feature_first 接入
+│   ├── ops/base_op.py                    # Filter 阶段拆分和签名
+│   ├── ops/filter_reorder.py             # feature/reduce 包装和重排
+│   └── utils/fingerprint_utils.py        # 稳定归一化和阶段哈希
+├── data-recipes/                         # 论文实验 YAML
+├── data/                                 # 本地数据（被 Git 忽略）
+├── tools/process_data.py                 # 命令行入口脚本
+├── run_*.sh                              # 实验命令列表
+├── tests/                                # 上游和扩展测试
+├── pyproject.toml                        # 依赖和 extras
+└── uv.lock                               # 锁定环境
+```
+
+## 扩展配置项
+
+| 配置项 | 可选值 | 作用 |
+| --- | --- | --- |
+| `filter_execution_mode` | `normal`, `feature_first` | 选择原始执行顺序或解耦的先特征后过滤顺序。 |
+| `use_cache` | `true`, `false` | 开启或关闭 Hugging Face Datasets 缓存管理。 |
+| `ds_cache_dir` | 目录路径 | 指定可复现实验的中间缓存位置。 |
+| `open_tracer` | `true`, `false` | 记录每个 Filter 前后的样本变化，便于调试但会增加开销。 |
+| `op_fusion` | `true`, `false` | `feature_first` 下保持关闭；配置层会自动关闭。 |
+| `use_checkpoint` | `true`, `false` | `feature_first` 下保持关闭；配置层会自动关闭。 |
+
+## 限制与复现注意事项
+
+- `feature_first` 只处理连续的统计型 `Filter` 片段，不是任意自定义算子的依赖分析器。
+- Mapper、Deduplicator 或 `NON_STATS_FILTERS` 成员会打断可重排片段，并保持 recipe 中的原始位置。
+- 当 `use_cache: true`、`ds_cache_dir` 持久存在，且输入数据、recipe 和软件环境一致时，缓存收益最明显。
+- 修改特征参数会使特征缓存失效；只修改阈值或区间语义时，会使归约缓存失效，同时保留特征结果。
+- 当前项目中，`feature_first` 会按设计关闭 checkpoint 和 operator fusion。
+- 多模态及模型算子需要额外依赖和模型权重，仓库只提供 recipe，不提供这些外部资产。
+
+## 与 Data-Juicer 的关系
+
+Data-Juicer 提供基础数据格式、算子注册、配置系统、导出器、tracer 和分布式执行能力。DecoupDAG 修改 Filter 的执行路径和 fingerprint 构造，同时保留上游算子接口和 recipe 风格。上游代码和第三方组件的许可信息见 [`LICENSE`](LICENSE)。
+
+如果使用基础系统或基于本项目开发，请在引用 DecoupDAG 论文的同时引用 Data-Juicer。该论文计划投稿 SIGMOD：
+
+```bibtex
+@inproceedings{datajuicer,
+  title     = {Data-Juicer: A One-Stop Data Processing System for Large Language Models},
+  author    = {Chen, Daoyuan and Huang, Yilun and Ma, Zhijian and Chen, Hesen and Pan, Xuchen and Ge, Ce and Gao, Dawei and Xie, Yuexiang and Liu, Zhaoyang and Gao, Jinyang and Li, Yaliang and Ding, Bolin and Zhou, Jingren},
+  booktitle = {International Conference on Management of Data},
+  year      = {2024}
+}
+```
+
+DecoupDAG 论文的 BibTeX 请以论文最终发布页面中的版本为准。
 
 ## 开源协议
 
-Data-Juicer 在 Apache License 2.0 协议下发布。
-
-## 贡献与致谢
-
-Data-Juicer 的发展离不开社区的参与和反馈，非常欢迎各方面的贡献：开发新的算子（无论是简单函数还是现有论文的先进算法）、分享新的数据菜谱和使用场景、提出新功能需求、提升代码效率、修复程序错误、完善项目文档、反馈使用体验等。您可参考[开发者指南](docs/DeveloperGuide_ZH.md)开启贡献；在社区中宣传本项目，或为我们的代码仓库点亮星标 ⭐，同样是对该项目非常宝贵的支持！
-
-我们由衷感谢所有为本项目做出贡献的[代码贡献者](https://github.com/datajuicer/data-juicer/graphs/contributors)，他们是本项目的基石。我们尽力确保以下名单的完整和及时，并期待更多名字的加入（英文字母序排列）。若有疏漏，请随时联系我们。
-
-- **发起方：** 阿里巴巴通义实验室
-- **联合研发优化：** 阿里云PAI、Anyscale (Ray Team)、中山大学 ([知识工程实验室](https://github.com/YingShen-SYSU/AIGC))、NVIDIA (NeMo Team) 等
-- **用户/提供无价反馈：** [AgentScope](https://github.com/agentscope-ai/agentscope)、阿里巴巴集团、蚂蚁集团、比亚迪、字节跳动、[DiffSynth-Studio](https://github.com/modelscope/DiffSynth-Studio)、袋鼠云、[EasyAnimate](https://github.com/aigc-apps/EasyAnimate)、[Eval-Scope](https://github.com/modelscope/evalscope)、京东、[LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory)、南京大学、OPPO、北京大学、[RM-Gallery](https://github.com/modelscope/RM-Gallery)、中国人民大学、清华大学、[Trinity-RFT](https://github.com/modelscope/Trinity-RFT)、中国科学院、中国科学院大学、小红书、小米、喜马拉雅、浙江大学等
-- **其它项目：** Data-Juicer 也感谢许多先驱开源项目，例如 [Apache Arrow](https://github.com/apache/arrow)、[BLOOM](https://huggingface.co/bigscience/bloom)、[Hugging Face Datasets](https://github.com/huggingface/datasets)、[RedPajama-Data](https://github.com/togethercomputer/RedPajama-Data/tree/rp_v1)、[Ray](https://github.com/ray-project/ray)、[vLLM](https://github.com/vllm-project/vllm) 等
-
-我们期待您的反馈与合作。如您有合作意向或关于新子项目的提案，欢迎通过 GitHub Issues、Pull Requests、[Slack](https://join.slack.com/t/data-juicer/shared_invite/zt-23zxltg9d-Z4d3EJuhZbCLGwtnLWWUDg?spm=a2c22.12281976.0.0.7a8253f30mgpjw) 频道、[钉钉](https://qr.dingtalk.com/action/joingroup?code=v1,k1,YFIXM2leDEk7gJP5aMC95AfYT+Oo/EP/ihnaIEhMyJM=&_dt_no_comment=1&origin=11)群或[邮件](mailto:datajuicer@outlook.com)与我们联系。
-
-
-## 参考文献
-如果您发现Data-Juicer对您的研发有帮助，请引用以下工作，[1.0paper](https://arxiv.org/abs/2309.02033), [2.0paper](https://arxiv.org/abs/2501.14755)。
-
-```
-@inproceedings{djv1,
-  title={Data-Juicer: A One-Stop Data Processing System for Large Language Models},
-  author={Daoyuan Chen and Yilun Huang and Zhijian Ma and Hesen Chen and Xuchen Pan and Ce Ge and Dawei Gao and Yuexiang Xie and Zhaoyang Liu and Jinyang Gao and Yaliang Li and Bolin Ding and Jingren Zhou},
-  booktitle={International Conference on Management of Data},
-  year={2024}
-}
-
-@article{djv2,
-  title={Data-Juicer 2.0: Cloud-Scale Adaptive Data Processing for and with Foundation Models},
-  author={Chen, Daoyuan and Huang, Yilun and Pan, Xuchen and Jiang, Nana and Wang, Haibin and Zhang, Yilei and Ge, Ce and Chen, Yushuo and Zhang, Wenhao and Ma, Zhijian and Huang, Jun and Lin, Wei and Li, Yaliang and Ding, Bolin and Zhou, Jingren},
-  journal={Advances in Neural Information Processing Systems},
-  year={2025}
-}
-```
-<details>
-<summary>更多Data-Juicer团队关于数据的论文:
-</summary>>
-
-- (ICML'25 Spotlight) [Data-Juicer Sandbox: A Feedback-Driven Suite for Multimodal Data-Model Co-development](https://arxiv.org/abs/2407.11784)
-
-- (CVPR'25) [ImgDiff: Contrastive Data Synthesis for Vision Large Language Models](https://arxiv.org/abs/2408.04594)
- 
-- (TPAMI'25) [The Synergy between Data and Multi-Modal Large Language Models: A Survey from Co-Development Perspective](https://arxiv.org/abs/2407.08583)
-
-- (NeurIPS'25) [Diversity as a Reward: Fine-Tuning LLMs on a Mixture of Domain-Undetermined Data](https://arxiv.org/abs/2502.04380)
-
-- (NeurIPS'25) [MindGYM: What Matters in Question Synthesis for Thinking-Centric Fine-Tuning?](https://arxiv.org/abs/2503.09499)
-
-- (Benchmark Data) [HumanVBench: Exploring Human-Centric Video Understanding Capabilities of MLLMs with Synthetic Benchmark Data](https://arxiv.org/abs/2412.17574)
- 
-- (Benchmark Data) [DetailMaster: Can Your Text-to-Image Model Handle Long Prompts?](https://www.arxiv.org/abs/2505.16915)
-
-- (Data Scaling) [BiMix: A Bivariate Data Mixing Law for Language Model Pretraining](https://arxiv.org/abs/2405.14908)
-
-</details>
-
+DecoupDAG 采用 Apache License 2.0，完整协议文本和第三方组件声明见 [`LICENSE`](LICENSE)。

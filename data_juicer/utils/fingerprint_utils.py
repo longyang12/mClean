@@ -1,7 +1,7 @@
 import functools
 import inspect
 from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, Iterable, List, Union
 
 import dill
 import numpy as np
@@ -223,6 +223,44 @@ def generate_stage_fingerprint(dataset_fingerprint, op_name, stage_name, stage_s
     new_fingerprint = update_fingerprint(dataset_fingerprint, transform, transform_args)
     validate_fingerprint(new_fingerprint)
     return new_fingerprint
+
+
+def generate_column_fingerprint(dataset_fingerprint, op_name, stage_name, column_name, column_signature=None):
+    """Generate a stable fingerprint for one logical output column.
+
+    Data-Juicer stores filter statistics in a row-wise dictionary column.  The
+    physical dataset cache therefore still uses a stage fingerprint, while
+    this finer-grained identity lets callers determine which statistic columns
+    are invalidated by a change in the input, operator, or column semantics.
+    """
+
+    transform = {
+        "type": "column_fingerprint",
+        "op_name": op_name,
+        "stage": stage_name,
+        "column": column_name,
+    }
+    transform_args = {"column_signature": normalize_fingerprint_value(column_signature)}
+    new_fingerprint = update_fingerprint(dataset_fingerprint, transform, transform_args)
+    validate_fingerprint(new_fingerprint)
+    return new_fingerprint
+
+
+def generate_column_fingerprints(
+    dataset_fingerprint, op_name, stage_name, columns: Iterable[str], column_signature=None
+) -> Dict[str, str]:
+    """Return deterministic fingerprints for a collection of logical columns."""
+
+    return {
+        column: generate_column_fingerprint(
+            dataset_fingerprint,
+            op_name,
+            stage_name,
+            column,
+            column_signature=column_signature,
+        )
+        for column in sorted(set(columns))
+    }
 
 
 def normalize_function_identity(function):

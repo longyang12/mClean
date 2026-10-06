@@ -5,7 +5,7 @@ import numpy as np
 import pyarrow as pa
 
 from data_juicer.utils.constant import Fields
-from data_juicer.utils.fingerprint_utils import generate_stage_fingerprint
+from data_juicer.utils.fingerprint_utils import generate_column_fingerprints, generate_stage_fingerprint
 from data_juicer.utils.mm_utils import size_to_bytes
 from data_juicer.utils.model_utils import free_models
 from data_juicer.utils.process_utils import calculate_np
@@ -579,6 +579,17 @@ class Filter(OP):
             self.get_threshold_signature(),
         )
 
+    def get_feature_column_fingerprints(self, dataset, columns):
+        """Return independent identities for the logical statistic columns."""
+
+        return generate_column_fingerprints(
+            getattr(dataset, "_fingerprint", None),
+            self._name,
+            "feature",
+            columns,
+            column_signature=self.get_feature_signature(),
+        )
+
     def get_keep_boolean(self, val, min_val=None, max_val=None):
         res_bool = True
         if min_val is not None:
@@ -642,6 +653,20 @@ class Filter(OP):
             desc=self._name + "_compute_stats",
             new_fingerprint=feature_fingerprint,
         )
+        # Statistics are physically stored in one nested column, but retaining
+        # logical column identities makes selective invalidation observable to
+        # analyzers and future column-aware cache managers.
+        # NestedDataset supports column access; distributed dataset backends
+        # may not expose the materialized rows locally, so keep this metadata
+        # best-effort without changing their execution contract.
+        try:
+            stat_columns = set()
+            for stat in new_dataset[Fields.stats]:
+                if isinstance(stat, dict):
+                    stat_columns.update(stat.keys())
+            new_dataset._dj_column_fingerprints = self.get_feature_column_fingerprints(dataset, stat_columns)
+        except (AttributeError, KeyError, TypeError):
+            pass
         if exporter and self.stats_export_path is not None:
             exporter.export_compute_stats(new_dataset, self.stats_export_path)
         free_models()
