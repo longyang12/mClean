@@ -1,12 +1,12 @@
-# DecoupDAG: Eliminating Compute Redundancy in Iterative Data Curation
+# IteraFlow: Eliminating Compute Redundancy in Iterative Data Curation
 
-DecoupDAG is the open-source research prototype accompanying our SIGMOD
+IteraFlow is the open-source research prototype accompanying our SIGMOD
 submission. It is implemented on top of
 [Data-Juicer](https://github.com/datajuicer/data-juicer) and targets redundant
 computation in iterative data-cleaning pipelines, especially when users tune
 filter thresholds or update data-processing operators.
 
-DecoupDAG preserves Data-Juicer's YAML recipes, operator registry, dataset
+IteraFlow preserves Data-Juicer's YAML recipes, operator registry, dataset
 abstraction, and text/multimodal processing support. It adds two execution
 optimizations:
 
@@ -91,8 +91,8 @@ ray 2.52.0 (optional)
 Install with `uv`:
 
 ```bash
-git clone https://github.com/longyang12/DecoupDAG.git
-cd DecoupDAG
+git clone https://github.com/longyang12/IteraFlow.git
+cd IteraFlow
 uv sync
 ```
 
@@ -120,7 +120,7 @@ python tools/process_data.py \
   --config data-recipes/redpajama-c4-refine-cpu-np1-nocache.yaml
 ```
 
-Enable the current DecoupDAG feature-first path in a YAML recipe:
+Enable the current IteraFlow feature-first path in a YAML recipe:
 
 ```yaml
 filter_execution_mode: feature_first
@@ -141,22 +141,22 @@ filter_execution_mode: normal
 
 ## Citation
 
-If you use DecoupDAG, please cite:
+If you use IteraFlow, please cite:
 
 ```bibtex
-@inproceedings{decoupdag-sigmod,
-  title     = {DecoupDAG: Eliminating Compute Redundancy in Iterative Data Curation via Operator Decoupling},
+@inproceedings{IteraFlow-sigmod,
+  title     = {IteraFlow: Eliminating Compute Redundancy in Iterative Data Curation via Operator Decoupling},
   author    = {<authors>},
   booktitle = {Proceedings of the ACM SIGMOD International Conference on Management of Data},
   year      = {<year>}
 }
 ```
 
-Because DecoupDAG is derived from Data-Juicer, please also cite the original
+Because IteraFlow is derived from Data-Juicer, please also cite the original
 Data-Juicer work.
 
 ## License
 
-DecoupDAG follows the Apache License 2.0 terms inherited from Data-Juicer.
+IteraFlow follows the Apache License 2.0 terms inherited from Data-Juicer.
 See [LICENSE](LICENSE) for the complete license and third-party notices.
 For the Chinese overview, see [README_ZH.md](README_ZH.md).
