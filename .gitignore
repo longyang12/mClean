@@ -3,6 +3,8 @@
 outputs/
 assets/
 data/
+!data_juicer/core/data/
+!data_juicer/core/data/iteraflow_cache.py
 
 
 # setup

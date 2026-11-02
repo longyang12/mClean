@@ -19,7 +19,6 @@ from loguru import logger
 
 FINGERPRINT_OWNER_ATTR_EXCLUDES = {
     "work_dir",
-    "skip_op_error",
     "batch_size",
     "num_proc",
     "cpu_required",
@@ -31,6 +30,7 @@ FINGERPRINT_OWNER_ATTR_EXCLUDES = {
     "runtime_env",
     "ray_execution_mode",
     "model_key",
+    "stats_export_path",
 }
 
 
@@ -207,7 +207,28 @@ def update_fingerprint(fingerprint, transform, transform_args):
     return hasher.hexdigest()
 
 
-def generate_stage_fingerprint(dataset_fingerprint, op_name, stage_name, stage_signature):
+def operator_code_signature(op, stage_name):
+    """Hash executable operator source, including shared Filter machinery.
+
+    External model artifacts are identified by configuration/revision and
+    must be versioned explicitly when their bytes change at a fixed path.
+    """
+    import hashlib
+
+    digest = hashlib.sha256()
+    digest.update(f"{type(op).__module__}.{type(op).__qualname__}:{stage_name}".encode())
+    for cls in type(op).__mro__:
+        if cls is object:
+            continue
+        try:
+            source = inspect.getsource(cls)
+        except (OSError, TypeError):
+            source = repr(cls)
+        digest.update(source.encode())
+    return digest.hexdigest()
+
+
+def generate_stage_fingerprint(dataset_fingerprint, op_name, stage_name, stage_signature, code_signature=None):
     """
     Generate a stable fingerprint for an explicitly decoupled internal stage.
     """
@@ -219,6 +240,7 @@ def generate_stage_fingerprint(dataset_fingerprint, op_name, stage_name, stage_s
     }
     transform_args = {
         "stage_signature": normalize_fingerprint_value(stage_signature),
+        "code_signature": code_signature,
     }
     new_fingerprint = update_fingerprint(dataset_fingerprint, transform, transform_args)
     validate_fingerprint(new_fingerprint)

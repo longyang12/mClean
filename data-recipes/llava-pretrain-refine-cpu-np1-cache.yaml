@@ -13,6 +13,7 @@ eoc_special_token: '<|__dj__eoc|>'                                # The special 
 open_tracer: true
 
 use_cache: true
+filter_execution_mode: feature_first
 ds_cache_dir: /inspire/hdd/project/smartsoftware/yanglong-253108120134/cache/llava-pretrain/cpu/np1/cache
 
 

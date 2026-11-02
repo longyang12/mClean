@@ -23,6 +23,7 @@ materialize_image_bytes: true
 open_tracer: false
 
 use_cache: true
+filter_execution_mode: feature_first
 
 # on qz
 # ds_cache_dir: /inspire/hdd/project/smartsoftware/yanglong-253108120134/cache/llava-pretrain/gpu/np1/cache

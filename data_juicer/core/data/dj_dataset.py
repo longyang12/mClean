@@ -287,6 +287,7 @@ class NestedDataset(Dataset, DJDataset):
         tracer=None,
         adapter=None,
         open_monitor=True,
+        stage_cache=None,
     ):
         # Local import to avoid logger being serialized in multiprocessing
         from loguru import logger
@@ -313,6 +314,22 @@ class NestedDataset(Dataset, DJDataset):
         op_num = len(operators)
         try:
             for idx, op in enumerate(operators, start=1):
+                input_dataset = dataset
+                cache_context = None
+                if stage_cache is not None:
+                    traced_names = {op._name}
+                    if hasattr(op, "filter_op"):
+                        traced_names.add(op.filter_op._name)
+                    if hasattr(op, "filter_ops"):
+                        traced_names.update(inner._name for inner in op.filter_ops)
+                    must_run = bool(
+                        (tracer and traced_names.intersection(tracer.op_list_to_trace))
+                        or getattr(op, "stats_export_path", None)
+                    )
+                    dataset, cache_context = stage_cache.before(op, dataset, allow_hit=not must_run)
+                    cache_hit = cache_context[2]
+                else:
+                    cache_hit = False
                 mp_context = ["forkserver", "spawn"] if (op.use_cuda() or op._name in unforkable_operators) else None
                 setup_mp(mp_context)
 
@@ -325,14 +342,18 @@ class NestedDataset(Dataset, DJDataset):
                     "exporter": exporter,
                     "tracer": tracer,
                 }
-                if open_monitor:
+                if cache_hit:
+                    resource_util_per_op = None
+                elif open_monitor:
                     dataset, resource_util_per_op = Monitor.monitor_func(op.run, args=run_args)
                 else:
                     dataset = op.run(**run_args)
+                if stage_cache is not None:
+                    stage_cache.after(cache_context, input_dataset, dataset)
                 # record processed ops
                 if checkpointer is not None:
                     checkpointer.record(op._op_cfg)
-                if open_monitor:
+                if open_monitor and not cache_hit:
                     resource_util_list.append(resource_util_per_op)
                 end = time()
                 output_fp = getattr(dataset, "_fingerprint", None)
@@ -376,6 +397,8 @@ class NestedDataset(Dataset, DJDataset):
                 except:  # noqa: E722
                     traceback.print_exc()
                     logger.error("Error occurred when making log summarization")
+        if stage_cache is not None:
+            dataset = stage_cache.materialize(dataset)
         return dataset
 
     def count(self) -> int:

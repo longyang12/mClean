@@ -8,6 +8,7 @@ np: 1  # number of subprocess to process your dataset
 open_tracer: true
 
 use_cache: true
+filter_execution_mode: feature_first
 ds_cache_dir: /inspire/hdd/project/smartsoftware/yanglong-253108120134/cache/c4/cpu/np1/cache
 
 

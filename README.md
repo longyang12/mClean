@@ -1,94 +1,50 @@
-# IteraFlow: Eliminating Compute Redundancy in Iterative Data Curation
+# IteraFlow
 
-IteraFlow is the open-source research prototype accompanying our SIGMOD
-submission. It is implemented on top of
-[Data-Juicer](https://github.com/datajuicer/data-juicer) and targets redundant
-computation in iterative data-cleaning pipelines, especially when users tune
-filter thresholds or update data-processing operators.
+**Eliminating Compute Redundancy in Iterative Data Curation via Operator Decoupling**
 
-IteraFlow preserves Data-Juicer's YAML recipes, operator registry, dataset
-abstraction, and text/multimodal processing support. It adds two execution
-optimizations:
+IteraFlow is the research prototype accompanying our ICDE submission. It extends
+[Data-Juicer](https://github.com/datajuicer/data-juicer) with an execution engine
+for iterative data curation, where filter thresholds and feature extractors are
+repeatedly updated over the same raw corpus.
 
-1. **Operator Decoupling and Topological Reordering (ODTR)** separates expensive
-   feature extraction from threshold-based filtering.
-2. **Fine-Grained Column-Aware Lineage Hashing (FCLH)** refines cache identity
-   from table-level stages toward logical feature columns.
+IteraFlow addresses two sources of redundant computation:
 
+- **Operator Decoupling and Topological Reordering (ODTR)** splits a statistical
+  filter into a row-preserving feature extractor and a threshold reducer. Feature
+  stages are reordered within Mapper and Deduplicator barriers, and compatible
+  reducers are fused into one packed-bitmask filtering pass.
+- **Fine-Grained Column-Aware Lineage Hashing (FCLH)** derives cache keys from an
+  operator's code, configuration, and referenced column lineages. Cached table
+  snapshots are reused without invalidating operators whose input columns are
+  unchanged.
 
-## Design Overview
+## Implementation
 
-Iterative curation commonly changes thresholds while keeping expensive feature
-computations unchanged. In the original execution pattern:
+The optimized execution path is enabled by two YAML options:
 
-```text
-F1 -> F2 -> ... -> Fn
+```yaml
+filter_execution_mode: feature_first
+use_cache: true
 ```
 
-ODTR rewrites a safe Filter group as:
+| Component | Location |
+| --- | --- |
+| Filter feature/reducer decomposition | `data_juicer/ops/base_op.py` |
+| Barrier-aware ODTR compiler and bitmask fusion | `data_juicer/ops/filter_reorder.py` |
+| Operator read/write schemas | `data_juicer/ops/operator_contract.py` |
+| Column lineage and table snapshot cache | `data_juicer/core/data/iteraflow_cache.py` |
+| Runtime integration | `data_juicer/core/executor/default_executor.py` |
+| Stable code/config fingerprints | `data_juicer/utils/fingerprint_utils.py` |
 
-```text
-F1.feature -> F2.feature -> ... -> Fn.feature
-    -> F1.reduce -> F2.reduce -> ... -> Fn.reduce
-```
-
-The feature stage computes row-preserving statistics, while the reduce stage
-uses those statistics to apply filtering policies. The intended full design
-also treats data-writing operators as dependency barriers and combines
-compatible reducer masks with:
-
-```text
-B_final = B1 AND B2 AND ... AND Bn
-```
-
-FCLH associates lineage metadata with generated feature columns. An operator's
-cache identity is intended to depend on its declared read columns and its
-normalized code/configuration, rather than on unrelated columns appended to
-the same table.
-
-## Changes to Data-Juicer
-
-| Component | Main files | Purpose |
-| --- | --- | --- |
-| Filter decomposition | `data_juicer/ops/base_op.py` | Adds feature and reduce execution stages |
-| Feature-first rewriting | `data_juicer/ops/filter_reorder.py` | Wraps Filter stages and rewrites consecutive Filter groups |
-| Executor integration | `data_juicer/core/executor/default_executor.py` | Enables the optimized execution mode |
-| Stage fingerprints | `data_juicer/utils/fingerprint_utils.py` | Separates feature and threshold signatures |
-| Dataset cache tracing | `data_juicer/core/data/dj_dataset.py` | Records map/filter fingerprint and cache information |
-| Configuration | `data_juicer/config/config.py` and `data_juicer/config/config_all.yaml` | Adds `filter_execution_mode` |
-
-The current implementation keeps the physical Hugging Face Datasets cache at
-the stage/table level. Logical statistic-column fingerprints are attached to
-feature-stage datasets for inspection and future lineage-aware cache
-management.
-
-## Repository Layout
-
-```text
-data_juicer/       Data-Juicer core, operators, executor, and fingerprints
-data-recipes/      Recipes used by the paper workloads
-demos/             End-to-end examples
-tests/             Unit and integration tests
-docs/              Data-Juicer documentation
-run_cpu.sh         CPU experiment commands
-run_gpu.sh         GPU experiment commands
-```
+Unknown operators are treated as write barriers unless they expose complete
+`read_columns` and `write_columns` schemas. `feature_first` disables per-sample
+error skipping because feature extraction must preserve cardinality before the
+fused reduction stage.
 
 ## Installation
 
-The project requires Python 3.10 or newer. The current `uv.lock` resolves the
-main environment with:
-
-```text
-datasets 3.6.0
-pyarrow 19.0.1
-numpy 1.26.4
-dill 0.3.8
-xxhash 3.5.0
-ray 2.52.0 (optional)
-```
-
-Install with `uv`:
+IteraFlow requires Python 3.10 or later. The paper environment uses Datasets
+3.6.0, PyArrow 19.0.1, NumPy 1.26.4, dill 0.3.8, and xxhash 3.5.0.
 
 ```bash
 git clone https://github.com/longyang12/IteraFlow.git
@@ -96,67 +52,143 @@ cd IteraFlow
 uv sync
 ```
 
-Alternatively, install the editable package with optional dependencies:
+An editable installation is also supported:
 
 ```bash
 python -m pip install -e ".[nlp,dev]"
 ```
 
-For distributed execution, install:
-
-```bash
-python -m pip install -e ".[distributed]"
-```
-
-Vision, audio, and model-backed operators may require additional optional
-dependencies and system libraries.
+Image and video workloads require the corresponding Data-Juicer optional
+dependencies and access to the models specified in their recipes.
 
 ## Quick Start
 
-The normal Data-Juicer execution path remains available:
+Run an IteraFlow recipe with the standard Data-Juicer entry point:
 
 ```bash
 python tools/process_data.py \
-  --config data-recipes/redpajama-c4-refine-cpu-np1-nocache.yaml
+  --config data-recipes/redpajama-arxiv-refine-cpu-np1-cache.yaml
 ```
 
-Enable the current IteraFlow feature-first path in a YAML recipe:
+Each run logs the compiled plan and cache statistics:
 
-```yaml
-filter_execution_mode: feature_first
-use_checkpoint: false
-op_fusion: false
+```text
+IteraFlow compiled plan: ... feature stages, ... fused reducers, ... total stages
+IteraFlow stage cache: ... hits, ... misses
 ```
 
-Then run the recipe with the same command. The optimized path rewrites
-consecutive statistics-based Filters while leaving non-statistical Filters and
-other operators in their original positions.
+Snapshots are stored in `<work_dir>/iteraflow_snapshots`. Reuse the same
+`work_dir` across iterative rounds and use a separate directory for each system
+variant.
 
-To compare against the baseline, use the same input data, operator
-configuration, output directory, and cache environment, and set:
+## Reproducing the ICDE Experiments
 
-```yaml
-filter_execution_mode: normal
-```
+The paper evaluates seven workloads over five rounds:
 
-## Citation
+| Workload | Modality | Samples | Size | Pipeline |
+| --- | --- | ---: | ---: | --- |
+| ArXiv | Text | 1,558,306 | 87.35 GB | 5M + 10F + 1D |
+| StackExchange | Text | 29,825,086 | 74.55 GB | 5M + 11F + 1D |
+| Wikipedia | Text | 29,834,171 | 111.89 GB | 5M + 11F + 1D |
+| GitHub | Text | 28,793,312 | 212.18 GB | 6M + 8F + 1D |
+| C4 | Text | 364,599,496 | 806.77 GB | 5M + 9F + 1D |
+| LLaVA | Image-text | 595,375 | 73.14 GB | 2M + 11F |
+| MSRVTT | Video-text | 180,000 | 27.04 GB | 7F |
 
-If you use IteraFlow, please cite:
+The trace consists of R0 cold execution; R1 head-filter threshold tuning; R2
+middle-filter threshold tuning; R3 tail-filter threshold tuning; and R4 operator
+or model upgrading. R4 replaces flagged-word filtering with toxicity
+classification for knowledge text, KenLM 3-gram with 5-gram for C4,
+alphanumeric filtering with AST syntax validation for GitHub, and CLIP-B with
+CLIP-L for multimodal workloads.
 
-```bibtex
-@inproceedings{IteraFlow-sigmod,
-  title     = {IteraFlow: Eliminating Compute Redundancy in Iterative Data Curation via Operator Decoupling},
-  author    = {<authors>},
-  booktitle = {Proceedings of the ACM SIGMOD International Conference on Management of Data},
-  year      = {<year>}
+Create a JSON file mapping workload names to server paths:
+
+```json
+{
+  "arxiv": "/data/arxiv/*.jsonl",
+  "stackex": "/data/stackexchange/*.jsonl",
+  "wiki": "/data/wikipedia/*.jsonl",
+  "github": "/data/github/*.jsonl",
+  "c4": "/data/c4/*.jsonl",
+  "llava": "/data/llava/chat-dj.jsonl",
+  "msrvtt": "/data/msrvtt/msrvtt_train_dj.jsonl"
 }
 ```
 
-Because IteraFlow is derived from Data-Juicer, please also cite the original
-Data-Juicer work.
+For R4, provide server-registered text and code operators. Their modules can be
+loaded with Data-Juicer's `custom_operator_paths` option.
+
+```json
+{
+  "arxiv": {"operator": "toxicity_filter", "parameters": {}},
+  "stackex": {"operator": "toxicity_filter", "parameters": {}},
+  "wiki": {"operator": "toxicity_filter", "parameters": {}},
+  "github": {"operator": "ast_syntax_filter", "parameters": {}},
+  "c4": {"operator": "perplexity_filter_5gram", "parameters": {}}
+}
+```
+
+Generate the complete experiment matrix:
+
+```bash
+python tools/iteraflow_server_matrix.py \
+  --inputs /path/to/server-inputs.json \
+  --r4-overrides /path/to/r4-overrides.json \
+  --custom-operator-path /path/to/r4_operators \
+  --output-root /scratch/iteraflow-icde
+```
+
+Add `--run` to execute the generated configurations. A single workload, system,
+or round can be selected with `--workload`, `--system`, and `--round`.
+
+| System | Configuration |
+| --- | --- |
+| No-Cache | `normal`, cache disabled |
+| Monolithic-Cache | `normal`, Data-Juicer table cache enabled |
+| IteraFlow | `feature_first`, FCLH enabled |
+| w/o FCLH | `feature_first`, table-level cache keys |
+| w/o ODTR | monolithic filters and table-level cache keys |
+
+Each run writes its YAML, configuration hash, raw log, wall-clock time, stage
+cache counts, and output SHA-256 under the experiment root. Summarize completed
+runs with:
+
+```bash
+python tools/summarize_iteraflow_server.py \
+  --root /scratch/iteraflow-icde \
+  --output /scratch/iteraflow-icde/summary.json
+```
+
+## Tests
+
+```bash
+export NUMBA_CACHE_DIR=/tmp/iteraflow-numba-cache
+export MPLCONFIGDIR=/tmp/iteraflow-mpl-cache
+
+python -m unittest discover -s tests/ops -p test_filter_reorder.py -q
+python -m unittest discover -s tests/tools -p test_iteraflow_server_matrix.py -q
+python -m unittest discover -s tests/utils -p test_fingerprint_utils.py -q
+```
+
+The tests cover filter decomposition, barrier placement, fused packed masks,
+column-aware invalidation, lazy snapshot reuse, schema fallbacks, experiment
+round generation, ablation settings, and result aggregation.
+
+## Citation
+
+```bibtex
+@inproceedings{yang2026iteraflow,
+  title     = {IteraFlow: Eliminating Compute Redundancy in Iterative Data Curation via Operator Decoupling},
+  author    = {Yang, Long and Wang, Jing and Li, Yaqi and Shao, Yuchen and Liu, Xuan and Wan, Chengcheng and Shi, Liang},
+  booktitle = {Proceedings of the IEEE International Conference on Data Engineering},
+  year      = {2026}
+}
+```
+
+IteraFlow is built on Data-Juicer. Please cite Data-Juicer when using the
+underlying operator library or recipes.
 
 ## License
 
-IteraFlow follows the Apache License 2.0 terms inherited from Data-Juicer.
-See [LICENSE](LICENSE) for the complete license and third-party notices.
-For the Chinese overview, see [README_ZH.md](README_ZH.md).
+This repository is released under the Apache License 2.0. See [LICENSE](LICENSE).

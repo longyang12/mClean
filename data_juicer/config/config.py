@@ -402,6 +402,12 @@ def init_configs(args: Optional[List[str]] = None, which_entry: object = None, l
                 "might take up lots of disk space when using cache",
             )
             parser.add_argument(
+                "--column_aware_cache",
+                type=bool,
+                default=True,
+                help="Use column lineage in IteraFlow stage cache keys. Set false for the FCLH ablation.",
+            )
+            parser.add_argument(
                 "--ds_cache_dir",
                 type=str,
                 default=None,
@@ -521,8 +527,8 @@ def init_configs(args: Optional[List[str]] = None, which_entry: object = None, l
                 type=str,
                 default="normal",
                 help='Filter execution mode. Support ["normal", "feature_first"] now. '
-                '"feature_first" rewrites consecutive Filter segments into feature stages '
-                "followed by reduce stages.",
+                '"feature_first" compiles audited Filters into feature and reduce stages, '
+                "and caches local stage snapshots when use_cache is enabled.",
             )
             parser.add_argument(
                 "--process",
@@ -742,6 +748,12 @@ def init_setup_from_cfg(cfg: Namespace, load_configs_only=False):
             'Should be one of ["normal", "feature_first"].'
         )
     if cfg.filter_execution_mode == "feature_first":
+        if cfg.get("skip_op_error", True):
+            logger.warning(
+                "Disable skip_op_error because feature_first requires "
+                "cardinality-preserving feature extraction."
+            )
+            cfg.skip_op_error = False
         if cfg.get("use_checkpoint", False):
             logger.warning("Disable checkpoint because feature_first filter execution is not compatible with it.")
             cfg.use_checkpoint = False

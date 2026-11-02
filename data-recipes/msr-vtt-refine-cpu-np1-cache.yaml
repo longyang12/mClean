@@ -10,7 +10,8 @@ export_path: '/inspire/hdd/project/smartsoftware/yanglong-253108120134/datasets/
 np: 1                                                       # number of subprocess to process your dataset
                                                             # Note: currently, we support specify only ONE key for each op, for cases requiring multiple keys, users can specify the op multiple times. We will only use the first key of `text_keys` when you set multiple keys.
 open_tracer: true                                          # whether to open the tracer to trace the changes during process. It might take more time when opening tracer
-use_cache: false
+use_cache: true
+filter_execution_mode: feature_first
 ds_cache_dir: /inspire/hdd/project/smartsoftware/yanglong-253108120134/cache/MSR-VTT/cpu/np1/cache
 
 

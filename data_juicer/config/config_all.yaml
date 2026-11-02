@@ -53,6 +53,7 @@ fusion_strategy: 'probe'                                    # OP fusion strategy
 cache_compress: null                                        # the compression method of the cache file, which can be specified in ['gzip', 'zstd', 'lz4']. If this parameter is None, the cache file will not be compressed. We recommend you turn on this argument when your input dataset is larger than tens of GB and your disk space is not enough.
 adaptive_batch_size: false                                  # whether to use adaptive batch sizes for each OP according to the probed results. It's False in default.
 filter_execution_mode: 'normal'                             # filter execution mode. Support ['normal', 'feature_first'] now.
+column_aware_cache: true                                    # use column lineage for IteraFlow cache keys; false reproduces the w/o FCLH ablation
 
 # for multimodal data processing
 image_key: 'images'                                         # key name of field to store the list of sample image paths.

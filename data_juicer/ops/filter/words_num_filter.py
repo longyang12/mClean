@@ -52,6 +52,7 @@ class WordsNumFilter(Filter):
         self.max_num = max_num
         self.model_key = None
         self.lang = lang
+        self.tokenization = tokenization
 
         if tokenization:
             self.model_key = prepare_model(model_type="sentencepiece", lang=lang)

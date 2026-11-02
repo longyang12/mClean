@@ -146,8 +146,16 @@ class DefaultExecutor(ExecutorBase):
         logger.info("Preparing process operators...")
         ops = load_ops(self.cfg.process)
         if self.cfg.filter_execution_mode == "feature_first":
-            logger.info("Rewriting consecutive Filter segments with feature_first strategy...")
+            logger.info("Compiling audited Filter stages with feature_first strategy...")
             ops = rewrite_filter_ops_feature_first(ops)
+            feature_count = sum(op._name.endswith(".feature") for op in ops)
+            reduce_count = sum(op._name.endswith(".reduce") for op in ops)
+            fused_count = sum(op._name == "fused_filter_reduce" for op in ops)
+            logger.info(
+                "IteraFlow compiled plan: "
+                f"{feature_count} feature stages, {reduce_count} standalone reducers, "
+                f"{fused_count} fused reducers, {len(ops)} total stages"
+            )
 
         # OP fusion
         if self.cfg.op_fusion:
@@ -175,6 +183,14 @@ class DefaultExecutor(ExecutorBase):
         # - If checkpoint is open, clean the cache files after each process
         logger.info("Processing data...")
         tstart = time()
+        stage_cache = None
+        if self.cfg.use_cache and self.cfg.filter_execution_mode == "feature_first":
+            from data_juicer.core.data.iteraflow_cache import StageSnapshotCache
+
+            stage_cache = StageSnapshotCache(
+                self.work_dir, dataset,
+                column_aware=self.cfg.get("column_aware_cache", True),
+            )
         dataset = dataset.process(
             ops,
             work_dir=self.work_dir,
@@ -183,9 +199,12 @@ class DefaultExecutor(ExecutorBase):
             tracer=self.tracer,
             adapter=self.adapter,
             open_monitor=self.cfg.open_monitor,
+            stage_cache=stage_cache,
         )
         tend = time()
         logger.info(f"All OPs are done in {tend - tstart:.3f}s.")
+        if stage_cache is not None:
+            logger.info(f"IteraFlow stage cache: {stage_cache.hits} hits, {stage_cache.misses} misses")
 
         # 4. data export
         if not skip_export:

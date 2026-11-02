@@ -18,6 +18,7 @@ np: 1                                                       # number of subproce
                                                             # Note: currently, we support specify only ONE key for each op, for cases requiring multiple keys, users can specify the op multiple times. We will only use the first key of `text_keys` when you set multiple keys.
 open_tracer: false                                          # whether to open the tracer to trace the changes during process. It might take more time when opening tracer
 use_cache: true
+filter_execution_mode: feature_first
 
 # on qz
 # ds_cache_dir: /inspire/hdd/project/smartsoftware/yanglong-253108120134/cache/MSR-VTT/gpu/np1/cache

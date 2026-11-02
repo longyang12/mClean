@@ -5,7 +5,12 @@ import numpy as np
 import pyarrow as pa
 
 from data_juicer.utils.constant import Fields
-from data_juicer.utils.fingerprint_utils import generate_column_fingerprints, generate_stage_fingerprint
+from data_juicer.utils.fingerprint_utils import (
+    extract_owner_semantic_state,
+    generate_column_fingerprints,
+    generate_stage_fingerprint,
+    operator_code_signature,
+)
 from data_juicer.utils.mm_utils import size_to_bytes
 from data_juicer.utils.model_utils import free_models
 from data_juicer.utils.process_utils import calculate_np
@@ -138,6 +143,11 @@ class OP:
     _accelerator = "cpu"
     _batched_op = False
 
+    def get_contract(self, stage=None):
+        from data_juicer.ops.operator_contract import contract_for
+
+        return contract_for(self, stage=stage)
+
     def __init__(self, *args, **kwargs):
         """
         Base class of operators.
@@ -203,6 +213,7 @@ class OP:
         # for unittest, do not skip the error.
         # It would be set to be True in config init.
         self.skip_op_error = kwargs.get("skip_op_error", False)
+        self.cache_revision = kwargs.get("cache_revision", None)
 
         # whether the model can be accelerated using cuda
         _accelerator = kwargs.get("accelerator", None)
@@ -543,25 +554,39 @@ class Filter(OP):
             return copy.deepcopy(op_args or {})
         return {}
 
+    def _get_semantic_args(self):
+        # Include effective defaults and direct-instantiation parameters, which
+        # are absent from the serialized process configuration.
+        return {**extract_owner_semantic_state(self), **self._get_op_cfg_args()}
+
     def _is_threshold_signature_key(self, key):
+        from data_juicer.ops.operator_contract import FILTER_STATS
+
+        if key in self.THRESHOLD_SIGNATURE_KEYS:
+            return True
+        if self._name not in FILTER_STATS:
+            return False
+        if self._name == "video_motion_score_filter" and key == "max_size":
+            return False
+        if key in {"any", "any_or_all"}:
+            return True
+        if self._name == "language_id_score_filter" and key == "lang":
+            return True
         return (
             key.startswith("min_")
             or key.startswith("max_")
             or key.endswith("_threshold")
             or key == "threshold"
-            or key in self.THRESHOLD_SIGNATURE_KEYS
         )
 
     def get_feature_signature(self):
-        op_args = self._get_op_cfg_args()
+        op_args = self._get_semantic_args()
         return {key: value for key, value in op_args.items() if not self._is_threshold_signature_key(key)}
 
     def get_threshold_signature(self):
-        op_args = self._get_op_cfg_args()
+        op_args = self._get_semantic_args()
         threshold_args = {key: value for key, value in op_args.items() if self._is_threshold_signature_key(key)}
-        if threshold_args:
-            return threshold_args
-        return op_args
+        return {**threshold_args, "skip_op_error": self.skip_op_error}
 
     def get_feature_fingerprint(self, dataset):
         return generate_stage_fingerprint(
@@ -569,6 +594,7 @@ class Filter(OP):
             self._name,
             "feature",
             self.get_feature_signature(),
+            code_signature=operator_code_signature(self, "feature"),
         )
 
     def get_threshold_fingerprint(self, dataset):
@@ -577,6 +603,7 @@ class Filter(OP):
             self._name,
             "reduce",
             self.get_threshold_signature(),
+            code_signature=operator_code_signature(self, "reduce"),
         )
 
     def get_feature_column_fingerprints(self, dataset, columns):
@@ -587,7 +614,10 @@ class Filter(OP):
             self._name,
             "feature",
             columns,
-            column_signature=self.get_feature_signature(),
+            column_signature={
+                "feature": self.get_feature_signature(),
+                "code": operator_code_signature(self, "feature"),
+            },
         )
 
     def get_keep_boolean(self, val, min_val=None, max_val=None):
